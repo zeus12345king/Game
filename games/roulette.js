@@ -117,7 +117,6 @@ async function startGame(context, nowTime, callback) {
   const sendOptions = {
     content,
     components: [actionRow],
-    flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
   };
   if (lobbyImageFile) sendOptions.files = [lobbyImageFile];
