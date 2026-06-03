@@ -1,4 +1,4 @@
-﻿const {
+const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -55,40 +55,68 @@ function clampLabel(s, max = 80) {
   s = String(s);
   return s.length > max ? s.slice(0, max - 2) + ".." : s;
 }
-function buildRouletteLobby(nowTime, players) {
+
+function buildRouletteLobby(nowTime, players, filesArray) {
   const sorted = [...players].sort((a, b) => a.index - b.index);
   const list = sorted.length
     ? sorted.map((p) => `> **${p.index + 1}.** <@${p.id}>`).join("\n")
     : "> لا يوجد لاعبين بعد";
-  return new ContainerBuilder()
+  
+  const container = new ContainerBuilder()
     .setAccentColor(config.colors.roulette)
     .addTextDisplayComponents(t => t.setContent(
       `## 🎰 لعبة روليت\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
       `**اللاعبون (${players.length}/${MAX_PLAYERS}):**\n${list}`
     ))
     .addSeparatorComponents(s => s.setDivider(false))
-    .addMediaGalleryComponents(g => { const img = config.lobbyImages.roulette; if (img) g.addItems(item => item.setURL(img)); return g; })
+    .addMediaGalleryComponents(g => { 
+      const img = config.lobbyImages.roulette; 
+      if (img) {
+        // Check if the path is local (starts with img/ or similar)
+        if (img.startsWith('img/') || img.startsWith('./img/') || (!img.startsWith('http://') && !img.startsWith('https://'))) {
+          // Local file - use attachment:// protocol and add to files array
+          const fileName = path.basename(img);
+          g.addItems(item => item.setURL(`attachment://${fileName}`));
+          if (filesArray) filesArray.push(new AttachmentBuilder(img, { name: fileName }));
+        } else {
+          // External URL
+          g.addItems(item => item.setURL(img));
+        }
+      }
+      return g;
+    })
     .addActionRowComponents(r => r.setComponents(
       new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Danger)
     ));
+  return container;
 }
 
 async function startGame(context, nowTime, callback) {
   const players = [];
 
-  const sentMessage = await context.reply({
-    components: [buildRouletteLobby(nowTime, players)],
+  // Prepare files array for local image
+  let filesArray = [];
+  const lobbyContainer = buildRouletteLobby(nowTime, players, filesArray);
+  const sendOptions = {
+    components: [lobbyContainer],
     flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
-  });
+  };
+  if (filesArray.length > 0) sendOptions.files = filesArray;
+
+  const sentMessage = await context.reply(sendOptions);
 
   async function updateLobbyView() {
     try {
-      await sentMessage.edit({
-        components: [buildRouletteLobby(nowTime, players)],
+      let newFiles = [];
+      const newContainer = buildRouletteLobby(nowTime, players, newFiles);
+      const editOptions = {
+        components: [newContainer],
         flags: MessageFlags.IsComponentsV2,
-      });
+      };
+      if (newFiles.length > 0) editOptions.files = newFiles;
+      await sentMessage.edit(editOptions);
     } catch (e) {
       console.error("Failed to update lobby view:", e);
     }
