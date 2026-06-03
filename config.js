@@ -30,7 +30,7 @@ module.exports = {
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
     mahbas:    'https://timg.eu.cc/2oSPlSjLG-.png', // محبس
     reverse:   'https://timg.eu.cc/IWQN7p3a-j.png', // عكسي
-    outsider:  'himg/out.png', // برا السالفة
+    outsider:  'img/out.png', // برا السالفة
   },
 
    // الاوان تبع الشريط الجانبي للأمبيد v2
