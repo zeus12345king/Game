@@ -33,7 +33,7 @@ function startHealthServer() {
   });
 
   app.listen(PORT, () => {
-    console.log('Made By Thailand Codes & b3oe/Error  ©2026 all rights reserved');
+    console.log('ZEUSSS HIHIHI...');
   });
 }
 
