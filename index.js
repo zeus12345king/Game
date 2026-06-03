@@ -21,31 +21,9 @@ const settings = require('./settings.js');
 const db = require('./database.js');
 
 const PORT = 3000;
-const FOOTER_TEXT = '-# Made By b3oe';
 const activeGames = new Map();
 
 let client;
-
-function patchContainerBuilderFooter() {
-  const originalToJSON = ContainerBuilder.prototype.toJSON;
-
-  ContainerBuilder.prototype.toJSON = function patchedContainerToJSON(...args) {
-    try {
-      const preview = originalToJSON.apply(this, args);
-      const hasFooter = Array.isArray(preview?.components)
-        && preview.components.some((component) => component?.content === FOOTER_TEXT);
-
-      if (!hasFooter) {
-        this.addTextDisplayComponents((text) => text.setContent(FOOTER_TEXT));
-      }
-    } catch (_) {
-      // Preserve serialization even if the footer check cannot inspect a component.
-      this.addTextDisplayComponents((text) => text.setContent(FOOTER_TEXT));
-    }
-
-    return originalToJSON.apply(this, args);
-  };
-}
 
 function startHealthServer() {
   const app = express();
@@ -176,7 +154,6 @@ async function handleMessageCreate(message) {
 }
 
 async function bootstrap() {
-  patchContainerBuilderFooter();
   startHealthServer();
 
   const groupGames = loadGroupGames();
