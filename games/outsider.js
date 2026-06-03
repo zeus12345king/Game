@@ -1,13 +1,15 @@
-﻿const {
+const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
   MessageFlags,
   InteractionWebhook,
+  AttachmentBuilder,
 } = require('discord.js');
 const db = require('../database.js');
 const config = require('../config.js');
+const path = require('path');
 
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 8;
@@ -45,33 +47,73 @@ module.exports = {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function resetGame() { GAME_ACTIVE = false; }
 
-function buildLobby(nowTime, players) {
+function buildLobby(nowTime, players, filesArray) {
   const TIME_TO_START = config.lobbyTime.outsider;
   const list = players.length
     ? players.map((p, i) => `> **${i+1}.** <@${p.id}>`).join('\n')
     : '> لا يوجد لاعبين بعد';
-  return new ContainerBuilder()
+  
+  const container = new ContainerBuilder()
     .setAccentColor(config.colors.outsider)
     .addTextDisplayComponents(t => t.setContent(
       `## 🕵️ لعبة برا السالفة\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
       `**اللاعبون (${players.length}/${MAX_PLAYERS}):**\n${list}`
     ))
-    .addMediaGalleryComponents(g => { const img = config.lobbyImages.outsider; if (img) g.addItems(i => i.setURL(img)); return g; })
+    .addMediaGalleryComponents(g => { 
+      const img = config.lobbyImages.outsider; 
+      if (img) {
+        // Check if the path is local (starts with img/ or similar)
+        if (img.startsWith('img/') || img.startsWith('./img/') || (!img.startsWith('http://') && !img.startsWith('https://'))) {
+          // Local file - use attachment:// protocol and add to files array
+          const fileName = path.basename(img);
+          g.addItems(item => item.setURL(`attachment://${fileName}`));
+          if (filesArray) filesArray.push(new AttachmentBuilder(img, { name: fileName }));
+        } else {
+          // External URL
+          g.addItems(item => item.setURL(img));
+        }
+      }
+      return g;
+    })
     .addActionRowComponents(r => r.setComponents(
       new ButtonBuilder().setCustomId('join').setLabel('دخول').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Danger)
     ));
+  return container;
 }
 
 async function startGame(context, nowTime, callback) {
   let players = [];
   const TIME_TO_START = config.lobbyTime.outsider;
 
-  const sent = await context.reply({
-    components: [buildLobby(nowTime, players)],
+  // Prepare files array for local image
+  let filesArray = [];
+  const lobbyContainer = buildLobby(nowTime, players, filesArray);
+  const sendOptions = {
+    components: [lobbyContainer],
     flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
-  });
+  };
+  if (filesArray.length > 0) sendOptions.files = filesArray;
+
+  const sent = await context.reply(sendOptions);
+
+  async function updateLobbyView() {
+    try {
+      let newFiles = [];
+      const newContainer = buildLobby(nowTime, players, newFiles);
+      const editOptions = {
+        components: [newContainer],
+        flags: MessageFlags.IsComponentsV2,
+      };
+      if (newFiles.length > 0) editOptions.files = newFiles;
+      await sent.edit(editOptions);
+    } catch (e) {
+      console.error("Failed to update lobby view:", e);
+    }
+  }
+
+  await updateLobbyView();
 
   const collector = sent.createMessageComponentCollector({
     filter: i => i.customId === 'join' || i.customId === 'exit',
@@ -87,10 +129,10 @@ async function startGame(context, nowTime, callback) {
         displayName: i.user.displayName,
         msgInfo: { applicationId: i.applicationId, interactionToken: i.token },
       });
-      await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+      await i.update({ components: [buildLobby(nowTime, players, [])], flags: MessageFlags.IsComponentsV2 });
     } else {
       players = players.filter(p => p.id !== i.user.id);
-      await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+      await i.update({ components: [buildLobby(nowTime, players, [])], flags: MessageFlags.IsComponentsV2 });
     }
   });
 
