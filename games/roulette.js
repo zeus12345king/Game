@@ -30,6 +30,7 @@ const emojis = [
 ];
 const Z1_EMOJI = "<:z1:1511780346008436946>";
 const Z2_EMOJI = "<:z2:1511780387506880542>";
+const Z3_EMOJI = "<:z3:1511872921142825040>";
 
 let CURRENTLY_SENDING_IMAGE = false;
 let LAST_SELECTED_PLAYER_ID = null;
@@ -73,6 +74,33 @@ async function downloadImage(url) {
       })
       .on("error", reject);
   });
+}
+
+// دالة لتوليد تدرجات اللون الوردي حسب عدد اللاعبين
+function generatePinkShades(count) {
+  const shades = [];
+  const baseHue = 340; // وردي زاهي
+  for (let i = 0; i < count; i++) {
+    const saturation = 60 + (i % 5) * 8; // 60% إلى 92%
+    const lightness = 35 + (i % 7) * 7; // 35% إلى 77%
+    shades.push(hslToHex(baseHue, saturation, lightness));
+  }
+  return shades;
+}
+
+// تحويل HSL إلى HEX
+function hslToHex(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
 }
 
 async function startGame(context, nowTime, callback) {
@@ -164,7 +192,7 @@ async function startGame(context, nowTime, callback) {
         players.push({
           id: i.user.id,
           index,
-          username: i.user.username || i.user.tag.split("#")[0],
+          username: i.user.displayName || i.user.username || i.user.tag?.split("#")[0] || "لاعب",
           avatarURL:
             i.user.displayAvatarURL({ extension: "png", forceStatic: true }) ||
             "https://cdn.discordapp.com/embed/avatars/0.png",
@@ -204,13 +232,13 @@ async function startGame(context, nowTime, callback) {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
       if (players.length < MIN_PLAYERS) {
-        await context.channel.send("🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
+        await sentMessage.reply("🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
         resetGameData();
         callback(null, false, 0, null);
         return;
       }
       let eliminatedPlayers = [];
-      await context.channel.send("| اللعبة تبدأ الآن!");
+      await sentMessage.reply(`${Z3_EMOJI} | تم الانتهاء من تسجيل اللاعبين، ستبدأ الجولة الاولى بعد قليل...`);
       await sleep(3000);
       await prepareRound(context, players, eliminatedPlayers, context.client, callback);
     } catch (err) {
@@ -319,7 +347,7 @@ async function prepareRound(
       LAST_SELECTED_PLAYER_ID = randomPlayerId;
 
       const attachment = new AttachmentBuilder(image, { name: "roulette.gif" });
-      await context.channel.send({ files: [attachment] });
+      const wheelMessage = await context.channel.send({ files: [attachment] });
       await sleep(1500);
       CURRENTLY_SENDING_IMAGE = false;
 
@@ -436,7 +464,8 @@ async function prepareRound(
       const contentMsg = `🎲 | <@${randomPlayerId}> لديك **${collectorTimeout / 1000} ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`;
 
       const allRows = targetRows.slice(0, 5);
-      const eliminationMessageA = await context.channel.send({
+      // رسالة الطرد تكون رد على رسالة العجلة (wheelMessage)
+      const eliminationMessageA = await wheelMessage.reply({
         content: contentMsg,
         components: allRows,
       });
@@ -1152,7 +1181,7 @@ async function selectRandomPlayer(context, players) {
   }
 }
 
-function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotation, isLastFrame, guildIcon) {
+function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotation, isLastFrame, guildIcon, pinkShades) {
   const cx = size / 2;
   const cy = size / 2;
   const wheelRadius = size * 0.44;
@@ -1177,12 +1206,14 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     const player = shuffledMembers[i];
     const isChosen = player.id === chosenId;
 
-    const baseColor = i % 2 === 0 ? "#2e3338" : "#424a54";
+    // استخدام تدرجات اللون الوردي
+    const baseColor = pinkShades[i % pinkShades.length];
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, wheelRadius, start, end);
     ctx.closePath();
-    ctx.fillStyle = isChosen && isLastFrame ? "#d4af37" : baseColor;
+    // عند توقف العجلة، القطاع المختار يصبح وردي فاتح جداً
+    ctx.fillStyle = isChosen && isLastFrame ? "#ffe6f0" : baseColor;
     ctx.fill();
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1.5;
@@ -1195,6 +1226,7 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     ctx.translate(tx, ty);
     ctx.rotate(mid);
     if (mid > Math.PI / 2 && mid < (3 * Math.PI) / 2) ctx.rotate(Math.PI);
+    // عرض اسم اللاعب وليس اليوزر
     const label = clampLabel(player.username, 13);
     const fontSize = Math.max(11, Math.min(17, 150 / Math.max(label.length, 1)));
     ctx.font = `bold ${fontSize}px IBM`;
@@ -1217,7 +1249,7 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     ctx.fillStyle = "#111316";
     ctx.fill();
   }
-  ctx.strokeStyle = isLastFrame ? "#d4af37" : "#888888";
+  ctx.strokeStyle = isLastFrame ? "#ffb3cc" : "#888888";
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.restore();
@@ -1259,6 +1291,9 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const HOLD_FRAMES = 6;
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
+    // توليد تدرجات اللون الوردي
+    const pinkShades = generatePinkShades(num);
+
     const encoder = new GIFEncoder(size, size, "neuquant", true);
     encoder.setRepeat(-1);
     encoder.setQuality(3);
@@ -1272,13 +1307,13 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
       const easedT = easeOut(t);
       const currentRotation = totalRotation * easedT;
       encoder.setDelay(f < SPIN_FRAMES * 0.4 ? 20 : Math.round(20 + (f / SPIN_FRAMES) * 90));
-      drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, currentRotation, false, guildIcon);
+      drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, currentRotation, false, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
     }
 
     encoder.setDelay(1500);
     for (let h = 0; h < HOLD_FRAMES; h++) {
-      drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, totalRotation, true, guildIcon);
+      drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, totalRotation, true, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
     }
 
