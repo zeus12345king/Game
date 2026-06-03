@@ -19,7 +19,7 @@ module.exports = {
   menuImage: 'https://timg.eu.cc/BR184u_RJz.png',
 
   lobbyImages: {
-    roulette:  'https://timg.eu.cc/9v1B27Am5f.png', // روليت
+    roulette:  'https://ibb.co/cXJp5hZ1', // روليت
     mafia:     'https://timg.eu.cc/7BqRG30LFH.png', // مافيا 
     dice:      'https://timg.eu.cc/jYFN4GK30G.png', // نرد 
     hide:      'https://timg.eu.cc/vBgwQ-NM-I.png', // هايد او غميضة 
@@ -30,7 +30,7 @@ module.exports = {
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
     mahbas:    'https://timg.eu.cc/2oSPlSjLG-.png', // محبس
     reverse:   'https://timg.eu.cc/IWQN7p3a-j.png', // عكسي
-    outsider:  'https://timg.eu.cc/cnKimna5Cf.png', // برا السالفة
+    outsider:  'https://ibb.co/8LGrqzZv', // برا السالفة
   },
 
    // الاوان تبع الشريط الجانبي للأمبيد v2
