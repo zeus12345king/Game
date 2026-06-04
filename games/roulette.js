@@ -59,12 +59,6 @@ function clampLabel(s, max = 80) {
   return s.length > max ? s.slice(0, max - 2) + ".." : s;
 }
 
-// تنظيف النص لإزالة الرموز غير القابلة للعرض
-function sanitizeText(text) {
-  if (!text) return "";
-  return text.replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFa-zA-Z0-9\s._-]/g, '');
-}
-
 // دالة لتحميل الصورة من رابط خارجي إلى Buffer
 async function downloadImage(url) {
   return new Promise((resolve, reject) => {
@@ -193,7 +187,7 @@ async function startGame(context, nowTime, callback) {
         players.push({
           id: i.user.id,
           index,
-          username: sanitizeText(i.user.displayName || i.user.username || i.user.tag?.split("#")[0] || "لاعب"),
+          username: i.user.displayName || i.user.username || i.user.tag?.split("#")[0] || "لاعب",
           avatarURL:
             i.user.displayAvatarURL({ extension: "png", forceStatic: true }) ||
             "https://cdn.discordapp.com/embed/avatars/0.png",
@@ -231,15 +225,39 @@ async function startGame(context, nowTime, callback) {
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
+      // إضافة بوتات وهمية إذا كان العدد أقل من الحد الأدنى
+      if (players.length < MIN_PLAYERS) {
+        const botsToAdd = MIN_PLAYERS - players.length;
+        let maxIndex = players.length > 0 ? Math.max(...players.map(p => p.index)) : -1;
+        for (let i = 0; i < botsToAdd; i++) {
+          maxIndex++;
+          players.push({
+            id: `bot_${Date.now()}_${i}`,
+            index: maxIndex,
+            username: `بوت ${i + 1}`,
+            avatarURL: "https://cdn.discordapp.com/embed/avatars/0.png",
+            color: getRandomDarkHexCode(COLOR, maxIndex),
+            protectedUntilRound: 0,
+            reverseUntilRound: 0,
+            frozenUntilRound: 0,
+            usedAbilities: new Set(),
+            isBot: true,
+          });
+        }
+        await sentMessage.reply(`🤖 | تمت إضافة **${botsToAdd}** بوت لتكملة العدد إلى ${MIN_PLAYERS} لاعبين.`);
+      }
+
+      // الآن بعد إضافة البوتات، نتحقق من العدد (لن يكون أقل من MIN_PLAYERS)
       if (players.length < MIN_PLAYERS) {
         await sentMessage.reply("🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
         resetGameData();
         callback(null, false, 0, null);
         return;
       }
+
       let eliminatedPlayers = [];
       await sentMessage.reply(`${Z3_EMOJI} | تم الانتهاء من تسجيل اللاعبين، ستبدأ الجولة الاولى بعد قليل...`);
-      await sleep(3000);
+      await sleep(3500); // زيدت 500 مللي ثانية
       await prepareRound(context, players, eliminatedPlayers, context.client, callback);
     } catch (err) {
       console.error("Error ending lobby collector:", err);
@@ -275,7 +293,7 @@ async function prepareRound(
         return;
       }
       await win(winner.id, context);
-      await sleep(2000);
+      await sleep(2500); // زيدت 500 مللي ثانية
       await context.channel.send({
         content: `🎉 | الفائز هو <@${winner.id}>! تهانينا!`,
       });
@@ -298,10 +316,10 @@ async function prepareRound(
         const winnerIndex = players.findIndex(p => p.id === winner.id);
         const content = `**${winnerIndex + 1} -** <@${winner.id}>`;
         await context.channel.send({ content, files: [attachment] });
-        await sleep(2000);
+        await sleep(2500); // زيدت 500 مللي ثانية
 
         await win(winner.id, context);
-        await sleep(2000);
+        await sleep(2500); // زيدت 500 مللي ثانية
         await context.channel.send({
           content: `🎉 | الفائز هو <@${winner.id}>! تهانينا!`,
         });
@@ -350,7 +368,7 @@ async function prepareRound(
       const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
       const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
       const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
-      await sleep(1500);
+      await sleep(2000); // زيدت 500 مللي ثانية (كانت 1500)
       CURRENTLY_SENDING_IMAGE = false;
 
       if (playerChosen.isBot) {
@@ -360,7 +378,7 @@ async function prepareRound(
           return;
         }
         const botTarget = botTargets[Math.floor(Math.random() * botTargets.length)];
-        await sleep(1500);
+        await sleep(2000); // زيدت 500 مللي ثانية (كانت 1500)
         await context.channel.send(`🤖 | **${playerChosen.username}** قرر طرد <@${botTarget.id}> عشوائياً!`);
         await lose(botTarget.id, context);
         eliminatedPlayers.push(botTarget);
@@ -423,7 +441,7 @@ async function prepareRound(
             .setCustomId("eliminate_random")
             .setEmoji("🎲")
             .setLabel("طرد عشوائي")
-            .setStyle(ButtonStyle.Primary)
+            .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
         );
 
       const abilityDefs = [
@@ -453,7 +471,7 @@ async function prepareRound(
           .setCustomId("eliminate_withdraw")
           .setEmoji("<:Gleave:1285563197092401214>")
           .setLabel("الانسحاب")
-          .setStyle(ButtonStyle.Danger)
+          .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
       );
 
       for (let i = 0; i < actionButtons.length; i += 5) {
@@ -1026,7 +1044,7 @@ async function prepareRound(
       await context.channel.send(
         "حدث خطأ أثناء اختيار اللاعب. سيتم اختيار لاعب عشوائي للمتابعة."
       );
-      await sleep(3000);
+      await sleep(3500); // زيدت 500 مللي ثانية
       await prepareRound(
         context,
         players,
@@ -1121,7 +1139,7 @@ async function mapPlayersToSectors(context, players) {
     players.map(async (player) => {
       return {
         number: player.index,
-        username: sanitizeText(player.username),
+        username: player.username, // تمت إزالة sanitizeText
         color: player.color,
         id: player.id,
         avatarURL: await getUserAvatarURL(context, player.id),
