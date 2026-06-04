@@ -1453,9 +1453,9 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const pinkShades = generatePinkShades(num);
 
     // إعدادات أبطأ
-    const earlyDelay = 50; // كان 30
-    const lateDelayMultiplier = 180; // كان 120
-    const holdDelay = 3000; // كان 2000
+    const earlyDelay = 40; // كان 30
+    const lateDelayMultiplier = 160; // كان 120
+    const holdDelay = 2300; // كان 2000
 
     const encoder = new GIFEncoder(size, size, "neuquant", true);
     encoder.setRepeat(-1);
