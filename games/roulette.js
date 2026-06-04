@@ -142,9 +142,9 @@ async function startGame(context, nowTime, callback) {
     .setStyle(ButtonStyle.Secondary);
   const shopButton = new ButtonBuilder()
     .setCustomId("open_shop_lobby")
-    .setEmoji("🛒")
+    .setEmoji("<:z13:1512229604147068948>")
     .setLabel("المتجر")
-    .setStyle(ButtonStyle.Primary);
+    .setStyle(ButtonStyle.Secondary);
   const actionRow = new ActionRowBuilder().addComponents(joinButton, exitButton, shopButton);
 
   const sendOptions = {
