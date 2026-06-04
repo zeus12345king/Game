@@ -532,7 +532,7 @@ async function prepareRound(
       actionButtons.push(
         new ButtonBuilder()
           .setCustomId("eliminate_withdraw")
-          .setEmoji("↩️") // تم تغيير الإيموجي إلى ↩️ ليتناسب مع "الانسحاب"
+          .setEmoji("<:z6:1512127272184975360>") // تم تغيير الإيموجي إلى ↩️ ليتناسب مع "الانسحاب"
           .setLabel("الانسحاب")
           .setStyle(ButtonStyle.Secondary)
       );
@@ -547,7 +547,7 @@ async function prepareRound(
       // إنشاء Embed وردي اللون للرسالة
       const embed = new EmbedBuilder()
         .setColor("#FF69B4") // لون وردي زهري
-        .setDescription(`🎲 | <@${randomPlayerId}> لديك **15 ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`);
+        .setDescription(`<:z5:1512126721367736481> | <@${randomPlayerId}> لديك **15 ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`);
 
       const allRows = targetRows.slice(0, 5);
       const eliminationMessageA = await wheelMessage.reply({
@@ -797,7 +797,7 @@ async function prepareRound(
               const idx = players.findIndex((p) => p.id === randomPlayerId);
               if (idx !== -1) players.splice(idx, 1);
               await ii.reply({
-                content: `🎲 | <@${randomPlayerId}> قرر الانسحاب...`,
+                content: `<:z6:1512127272184975360> | <@${randomPlayerId}> قرر الانسحاب...`,
                 ephemeral: true,
               });
               playerHasWithdraw = true;
