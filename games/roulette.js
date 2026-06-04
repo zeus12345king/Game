@@ -32,6 +32,9 @@ const Z1_EMOJI = "<:z1:1511780346008436946>";
 const Z2_EMOJI = "<:z2:1511780387506880542>";
 const Z3_EMOJI = "<:z3:1511872921142825040>";
 
+// عدد البوتات الوهمية المطلوب إضافتها
+const BOT_COUNT = 8;
+
 let CURRENTLY_SENDING_IMAGE = false;
 let LAST_SELECTED_PLAYER_ID = null;
 let LAST_ROUND_TIME = 0;
@@ -225,9 +228,10 @@ async function startGame(context, nowTime, callback) {
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
-      // إضافة بوتات وهمية إذا كان العدد أقل من الحد الأدنى
-      if (players.length < MIN_PLAYERS) {
-        const botsToAdd = MIN_PLAYERS - players.length;
+      // إضافة بوتات وهمية إلى أن يصل العدد الإجمالي إلى BOT_COUNT (8)
+      const totalPlayersNeeded = BOT_COUNT;
+      if (players.length < totalPlayersNeeded) {
+        const botsToAdd = totalPlayersNeeded - players.length;
         let maxIndex = players.length > 0 ? Math.max(...players.map(p => p.index)) : -1;
         for (let i = 0; i < botsToAdd; i++) {
           maxIndex++;
@@ -244,10 +248,9 @@ async function startGame(context, nowTime, callback) {
             isBot: true,
           });
         }
-        await sentMessage.reply(`🤖 | تمت إضافة **${botsToAdd}** بوت لتكملة العدد إلى ${MIN_PLAYERS} لاعبين.`);
+        await sentMessage.reply(`🤖 | تمت إضافة **${botsToAdd}** بوت لتكملة العدد إلى ${totalPlayersNeeded} لاعبين.`);
       }
 
-      // الآن بعد إضافة البوتات، نتحقق من العدد (لن يكون أقل من MIN_PLAYERS)
       if (players.length < MIN_PLAYERS) {
         await sentMessage.reply("🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
         resetGameData();
@@ -257,7 +260,7 @@ async function startGame(context, nowTime, callback) {
 
       let eliminatedPlayers = [];
       await sentMessage.reply(`${Z3_EMOJI} | تم الانتهاء من تسجيل اللاعبين، ستبدأ الجولة الاولى بعد قليل...`);
-      await sleep(3500); // زيدت 500 مللي ثانية
+      await sleep(4500); // زيدت أكثر
       await prepareRound(context, players, eliminatedPlayers, context.client, callback);
     } catch (err) {
       console.error("Error ending lobby collector:", err);
@@ -276,8 +279,8 @@ async function prepareRound(
 ) {
   try {
     const currentTime = Date.now();
-    if (currentTime - LAST_ROUND_TIME < 5000) {
-      await sleep(5000 - (currentTime - LAST_ROUND_TIME));
+    if (currentTime - LAST_ROUND_TIME < 6000) { // زيد وقت الانتظار
+      await sleep(6000 - (currentTime - LAST_ROUND_TIME));
     }
     LAST_ROUND_TIME = Date.now();
     ROUND_COUNTER++;
@@ -292,10 +295,27 @@ async function prepareRound(
         callback(null, false, 0, null);
         return;
       }
-      await win(winner.id, context);
-      await sleep(2500); // زيدت 500 مللي ثانية
+
+      // الحصول على النقاط القديمة والجديدة
+      const oldPoints = await db.getUserPoints(winner.id) || 0;
+      const pointsToAdd = getRandomWinPoints();
+      const newPoints = oldPoints + pointsToAdd;
+      await db.addPoints(winner.id, pointsToAdd);
+
+      // زر العرض المعطل
+      const pointsButton = new ButtonBuilder()
+        .setCustomId('winner_points_display')
+        .setEmoji('🍪')
+        .setLabel(`${newPoints} [+${pointsToAdd}]`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true);
+
+      const row = new ActionRowBuilder().addComponents(pointsButton);
+
+      await sleep(3500); // أبطأ
       await context.channel.send({
-        content: `🎉 | الفائز هو <@${winner.id}>! تهانينا!`,
+        content: `# 👑 - <@${winner.id}> فاز باللعبة!`,
+        components: [row],
       });
       resetGameData();
       callback(null, false, 0, null);
@@ -316,12 +336,28 @@ async function prepareRound(
         const winnerIndex = players.findIndex(p => p.id === winner.id);
         const content = `**${winnerIndex + 1} -** <@${winner.id}>`;
         await context.channel.send({ content, files: [attachment] });
-        await sleep(2500); // زيدت 500 مللي ثانية
+        await sleep(3500); // أبطأ
 
-        await win(winner.id, context);
-        await sleep(2500); // زيدت 500 مللي ثانية
+        // الحصول على النقاط القديمة والجديدة
+        const oldPoints = await db.getUserPoints(winner.id) || 0;
+        const pointsToAdd = getRandomWinPoints();
+        const newPoints = oldPoints + pointsToAdd;
+        await db.addPoints(winner.id, pointsToAdd);
+
+        // زر العرض المعطل
+        const pointsButton = new ButtonBuilder()
+          .setCustomId('winner_points_display')
+          .setEmoji('🍪')
+          .setLabel(`${newPoints} [+${pointsToAdd}]`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true);
+
+        const row = new ActionRowBuilder().addComponents(pointsButton);
+
+        await sleep(2500); // أبطأ
         await context.channel.send({
-          content: `🎉 | الفائز هو <@${winner.id}>! تهانينا!`,
+          content: `# 👑 - <@${winner.id}> فاز باللعبة!`,
+          components: [row],
         });
 
         resetGameData();
@@ -331,10 +367,26 @@ async function prepareRound(
         console.error("Error in final round:", err);
         const randomIndex = Math.floor(Math.random() * 2);
         const winner = players[randomIndex];
-        await context.channel.send(
-          `🎲 | حدث خطأ، الفائز هو <@${winner.id}>!`
-        );
-        await win(winner.id, context);
+
+        const oldPoints = await db.getUserPoints(winner.id) || 0;
+        const pointsToAdd = getRandomWinPoints();
+        const newPoints = oldPoints + pointsToAdd;
+        await db.addPoints(winner.id, pointsToAdd);
+
+        const pointsButton = new ButtonBuilder()
+          .setCustomId('winner_points_display')
+          .setEmoji('🍪')
+          .setLabel(`${newPoints} [+${pointsToAdd}]`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true);
+
+        const row = new ActionRowBuilder().addComponents(pointsButton);
+
+        await context.channel.send({
+          content: `# 👑 - <@${winner.id}> فاز باللعبة!`,
+          components: [row],
+        });
+
         resetGameData();
         callback(null, false, 0, null);
         return;
@@ -368,7 +420,7 @@ async function prepareRound(
       const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
       const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
       const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
-      await sleep(2000); // زيدت 500 مللي ثانية (كانت 1500)
+      await sleep(3000); // أبطأ (كانت 2000)
       CURRENTLY_SENDING_IMAGE = false;
 
       if (playerChosen.isBot) {
@@ -378,7 +430,7 @@ async function prepareRound(
           return;
         }
         const botTarget = botTargets[Math.floor(Math.random() * botTargets.length)];
-        await sleep(2000); // زيدت 500 مللي ثانية (كانت 1500)
+        await sleep(3000); // أبطأ (كانت 2000)
         await context.channel.send(`🤖 | **${playerChosen.username}** قرر طرد <@${botTarget.id}> عشوائياً!`);
         await lose(botTarget.id, context);
         eliminatedPlayers.push(botTarget);
@@ -1044,7 +1096,7 @@ async function prepareRound(
       await context.channel.send(
         "حدث خطأ أثناء اختيار اللاعب. سيتم اختيار لاعب عشوائي للمتابعة."
       );
-      await sleep(3500); // زيدت 500 مللي ثانية
+      await sleep(4500); // أبطأ
       await prepareRound(
         context,
         players,
@@ -1139,7 +1191,7 @@ async function mapPlayersToSectors(context, players) {
     players.map(async (player) => {
       return {
         number: player.index,
-        username: player.username, // تمت إزالة sanitizeText
+        username: player.username,
         color: player.color,
         id: player.id,
         avatarURL: await getUserAvatarURL(context, player.id),
@@ -1286,8 +1338,8 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const targetAngle = -(chosenIdx + 0.5) * anglePer;
     const totalRotation = targetAngle + 7 * 2 * Math.PI;
 
-    const SPIN_FRAMES = 60;
-    const HOLD_FRAMES = 6;
+    const SPIN_FRAMES = 90; // زيدت الإطارات
+    const HOLD_FRAMES = 10; // زيدت إطارات التوقف
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
     const pinkShades = generatePinkShades(num);
@@ -1304,12 +1356,12 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
       const t = f / (SPIN_FRAMES - 1);
       const easedT = easeOut(t);
       const currentRotation = totalRotation * easedT;
-      encoder.setDelay(f < SPIN_FRAMES * 0.4 ? 20 : Math.round(20 + (f / SPIN_FRAMES) * 90));
+      encoder.setDelay(f < SPIN_FRAMES * 0.4 ? 30 : Math.round(30 + (f / SPIN_FRAMES) * 120)); // أبطأ
       drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, currentRotation, false, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
     }
 
-    encoder.setDelay(1500);
+    encoder.setDelay(2000); // أبطأ
     for (let h = 0; h < HOLD_FRAMES; h++) {
       drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, totalRotation, true, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
@@ -1338,11 +1390,12 @@ function getRandomWinPoints() {
 }
 
 async function win(playerId, context) {
+  // لم تعد ترسل رسالة منفصلة، فقط تضيف النقاط
   try {
     const points = getRandomWinPoints();
     await db.addPoints(playerId, points);
     console.log(`[Roulette] Gave ${points} points to winner ${playerId}`);
-    if (context) context.channel.send(`🏆 | <@${playerId}> فاز بـ **${points}** نقطة!`).catch(() => {});
+    // حذف إرسال رسالة النقاط القديمة
   } catch (e) {
     console.error(`[Roulette] Failed to apply win points: ${e}`);
   }
