@@ -59,6 +59,12 @@ function clampLabel(s, max = 80) {
   return s.length > max ? s.slice(0, max - 2) + ".." : s;
 }
 
+// تنظيف النص لإزالة الرموز غير القابلة للعرض
+function sanitizeText(text) {
+  if (!text) return "";
+  return text.replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFa-zA-Z0-9\s._-]/g, '');
+}
+
 // دالة لتحميل الصورة من رابط خارجي إلى Buffer
 async function downloadImage(url) {
   return new Promise((resolve, reject) => {
@@ -79,10 +85,10 @@ async function downloadImage(url) {
 // دالة لتوليد تدرجات اللون الوردي حسب عدد اللاعبين
 function generatePinkShades(count) {
   const shades = [];
-  const baseHue = 340; // وردي زاهي
+  const baseHue = 340;
   for (let i = 0; i < count; i++) {
-    const saturation = 60 + (i % 5) * 8; // 60% إلى 92%
-    const lightness = 35 + (i % 7) * 7; // 35% إلى 77%
+    const saturation = 60 + (i % 5) * 8;
+    const lightness = 35 + (i % 7) * 7;
     shades.push(hslToHex(baseHue, saturation, lightness));
   }
   return shades;
@@ -107,10 +113,8 @@ async function startGame(context, nowTime, callback) {
   const players = [];
   const endTime = nowTime + TIME_TO_START / 1000;
 
-  // بناء محتوى الرسالة
   let content = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
 
-  // تجهيز صورة اللوبي
   let lobbyImageFile = null;
   const img = config.lobbyImages.roulette;
   if (img) {
@@ -129,7 +133,6 @@ async function startGame(context, nowTime, callback) {
     }
   }
 
-  // بناء الأزرار
   const joinButton = new ButtonBuilder()
     .setCustomId("join")
     .setEmoji(Z1_EMOJI)
@@ -151,7 +154,6 @@ async function startGame(context, nowTime, callback) {
 
   const sentMessage = await context.reply(sendOptions);
 
-  // دالة تحديث محتوى الرسالة عند انضمام/خروج
   async function updateLobbyView() {
     try {
       const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
@@ -161,7 +163,6 @@ async function startGame(context, nowTime, callback) {
     }
   }
 
-  // مؤقت لتحديث الوقت بشكل دوري (كل 10 ثوانٍ تقريباً)
   const updateInterval = setInterval(async () => {
     try {
       const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
@@ -192,7 +193,7 @@ async function startGame(context, nowTime, callback) {
         players.push({
           id: i.user.id,
           index,
-          username: i.user.displayName || i.user.username || i.user.tag?.split("#")[0] || "لاعب",
+          username: sanitizeText(i.user.displayName || i.user.username || i.user.tag?.split("#")[0] || "لاعب"),
           avatarURL:
             i.user.displayAvatarURL({ extension: "png", forceStatic: true }) ||
             "https://cdn.discordapp.com/embed/avatars/0.png",
@@ -228,7 +229,6 @@ async function startGame(context, nowTime, callback) {
   collector.on("end", async () => {
     clearInterval(updateInterval);
     try {
-      // تعديل الرسالة بحيث يبقى فقط الصورة (نحذف المحتوى والأزرار، الملف المرفق يبقى)
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
       if (players.length < MIN_PLAYERS) {
@@ -294,10 +294,10 @@ async function prepareRound(
           players
         );
         const winner = playerChosen;
-        const attachment = new AttachmentBuilder(image, {
-          name: "roulette.gif",
-        });
-        await context.channel.send({ files: [attachment] });
+        const attachment = new AttachmentBuilder(image, { name: "roulette.gif" });
+        const winnerIndex = players.findIndex(p => p.id === winner.id);
+        const content = `**${winnerIndex + 1} -** <@${winner.id}>`;
+        await context.channel.send({ content, files: [attachment] });
         await sleep(2000);
 
         await win(winner.id, context);
@@ -347,7 +347,9 @@ async function prepareRound(
       LAST_SELECTED_PLAYER_ID = randomPlayerId;
 
       const attachment = new AttachmentBuilder(image, { name: "roulette.gif" });
-      const wheelMessage = await context.channel.send({ files: [attachment] });
+      const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
+      const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
+      const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
       await sleep(1500);
       CURRENTLY_SENDING_IMAGE = false;
 
@@ -464,7 +466,6 @@ async function prepareRound(
       const contentMsg = `🎲 | <@${randomPlayerId}> لديك **${collectorTimeout / 1000} ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`;
 
       const allRows = targetRows.slice(0, 5);
-      // رسالة الطرد تكون رد على رسالة العجلة (wheelMessage)
       const eliminationMessageA = await wheelMessage.reply({
         content: contentMsg,
         components: allRows,
@@ -508,10 +509,8 @@ async function prepareRound(
 
         if (targetObj.protectedUntilRound >= ROUND_COUNTER) {
           targetObj.protectedUntilRound = 0;
-          await interaction.update({
-            content: `🛡️ | تم منع محاولة طرد <@${targetId}> بواسطة الحماية!`,
-            components: [],
-          });
+          await context.channel.send(`🛡️ | اللاعب <@${targetId}> محمي! لم يتم طرده.`);
+          stopAll("done");
           await prepareRound(
             context,
             players,
@@ -524,14 +523,12 @@ async function prepareRound(
 
         if (targetObj.reverseUntilRound >= ROUND_COUNTER) {
           targetObj.reverseUntilRound = 0;
-          await interaction.update({
-            content: `🔁 | رد الطرد! <@${chooserId}> تم طردك بدلًا من <@${targetId}>!`,
-            components: [],
-          });
+          await context.channel.send(`🔁 | رد الطرد! <@${chooserId}> تم طردك بدلًا من <@${targetId}>!`);
           await lose(chooserId, context);
           eliminatedPlayers.push(chooserObj);
           const idx = players.findIndex((p) => p.id === chooserId);
           if (idx !== -1) players.splice(idx, 1);
+          stopAll("done");
           await prepareRound(
             context,
             players,
@@ -578,15 +575,9 @@ async function prepareRound(
           kicktwice.firstTargetId = targetId;
         } else {
           if (kicktwice.status && kicktwice.firstTargetId) {
-            await interaction.update({
-              content: `💣 | تم طرد <@${kicktwice.firstTargetId}> و <@${targetId}>.`,
-              components: [],
-            });
+            await context.channel.send(`💣 | تم طرد <@${kicktwice.firstTargetId}> و <@${targetId}>.`);
           } else {
-            await interaction.update({
-              content: `💣 | تم طرد <@${targetId}>.`,
-              components: [],
-            });
+            await context.channel.send(`💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`);
           }
         }
 
@@ -603,6 +594,7 @@ async function prepareRound(
           } else {
             kicktwice.status = false;
             kicktwice.firstTargetId = null;
+            stopAll("done");
             await prepareRound(
               context,
               players,
@@ -613,6 +605,7 @@ async function prepareRound(
             return;
           }
         } else {
+          stopAll("done");
           await prepareRound(
             context,
             players,
@@ -648,10 +641,7 @@ async function prepareRound(
 
             if (isReversed && isEliminationAttempt) {
               chooserObj.reverseUntilRound = 0;
-              await ii.update({
-                content: `🔁 | لقد حاولت طرد لاعب وأنت تحت تأثير "طرد عكسي"! تم طردك.`,
-                components: [],
-              });
+              await context.channel.send(`🔁 | لقد حاولت طرد لاعب وأنت تحت تأثير "طرد عكسي"! تم طردك.`);
 
               await lose(randomPlayerId, context);
               eliminatedPlayers.push(chooserObj);
@@ -722,9 +712,9 @@ async function prepareRound(
             if (cid === "eliminate_withdraw") {
               const idx = players.findIndex((p) => p.id === randomPlayerId);
               if (idx !== -1) players.splice(idx, 1);
-              await ii.update({
+              await ii.reply({
                 content: `🎲 | <@${randomPlayerId}> قرر الانسحاب...`,
-                components: [],
+                ephemeral: true,
               });
               playerHasWithdraw = true;
               await lose(randomPlayerId, context);
@@ -738,10 +728,6 @@ async function prepareRound(
               );
               return;
             } else if (cid === "eliminate_random") {
-              await ii.update({
-                content: `🎲 | <@${randomPlayerId}> قرر الطرد العشوائي...`,
-                components: [],
-              });
               let randomTarget =
                 filteredPlayers[
                 Math.floor(Math.random() * filteredPlayers.length)
@@ -773,7 +759,6 @@ async function prepareRound(
               );
               return;
             } else if (cid === "eliminate_nuclear") {
-              await ii.update({ components: [] });
               await inv.useItem(randomPlayerId, 'nuclear');
               chooserObj.usedAbilities.add("nuclear");
               const others = players.filter((p) => p.id !== randomPlayerId);
@@ -822,9 +807,10 @@ async function prepareRound(
                 voteTaken = false;
                 return;
               }
-              await ii.update({
+              await ii.reply({
                 content: `🎲 | <@${randomPlayerId}> قرر إحياء لاعب...`,
                 components: reviveRows,
+                ephemeral: true,
               });
               await inv.useItem(randomPlayerId, 'revive');
               chooserObj.usedAbilities.add("revive");
@@ -893,9 +879,10 @@ async function prepareRound(
                     ...abilityTargets.slice(r, r + 5)
                   )
                 );
-              await ii.update({
+              await ii.reply({
                 content: `اختر لاعب لتطبيق القدرة (${ability}):`,
                 components: abilityRows,
+                ephemeral: true,
               });
               const abilityCollector = ii.message.createMessageComponentCollector(
                 {
@@ -1134,7 +1121,7 @@ async function mapPlayersToSectors(context, players) {
     players.map(async (player) => {
       return {
         number: player.index,
-        username: player.username,
+        username: sanitizeText(player.username),
         color: player.color,
         id: player.id,
         avatarURL: await getUserAvatarURL(context, player.id),
@@ -1145,12 +1132,6 @@ async function mapPlayersToSectors(context, players) {
 }
 
 async function selectRandomPlayer(context, players) {
-  const messageContent =
-    players.length === 2
-      ? " | العجلة تدور لاختيار الفائز..."
-      : " | العجلة تدور لاختيار اللاعب...";
-  await context.channel.send(messageContent);
-
   try {
     const sectors = await mapPlayersToSectors(context, players);
 
@@ -1204,19 +1185,17 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     const end = start + anglePer;
     const mid = (start + end) / 2;
     const player = shuffledMembers[i];
-    const isChosen = player.id === chosenId;
 
-    // استخدام تدرجات اللون الوردي
     const baseColor = pinkShades[i % pinkShades.length];
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, wheelRadius, start, end);
     ctx.closePath();
-    // عند توقف العجلة، القطاع المختار يصبح وردي فاتح جداً
-    ctx.fillStyle = isChosen && isLastFrame ? "#ffe6f0" : baseColor;
+    ctx.fillStyle = baseColor;
     ctx.fill();
+    // فواصل بيضاء بين اللاعبين
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
     ctx.save();
@@ -1226,11 +1205,10 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     ctx.translate(tx, ty);
     ctx.rotate(mid);
     if (mid > Math.PI / 2 && mid < (3 * Math.PI) / 2) ctx.rotate(Math.PI);
-    // عرض اسم اللاعب وليس اليوزر
-    const label = clampLabel(player.username, 13);
-    const fontSize = Math.max(11, Math.min(17, 150 / Math.max(label.length, 1)));
-    ctx.font = `bold ${fontSize}px IBM`;
-    ctx.fillStyle = isChosen && isLastFrame ? "#1a1d21" : "#ffffff";
+    const label = clampLabel(player.username, 10);
+    const fontSize = Math.max(9, Math.min(14, 140 / Math.max(label.length, 1)));
+    ctx.font = `bold ${fontSize}px Arial`;
+    ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(label, 0, 0);
@@ -1239,6 +1217,7 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
 
   ctx.restore();
 
+  // الدائرة الداخلية
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
@@ -1249,22 +1228,24 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     ctx.fillStyle = "#111316";
     ctx.fill();
   }
-  ctx.strokeStyle = isLastFrame ? "#ffb3cc" : "#888888";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
   ctx.stroke();
   ctx.restore();
 
-  const needleY = cy - wheelRadius - 2;
+  // إبرة من جهة اليمين (زاوية 0) - أكبر وأوضح
+  const needleX = cx + wheelRadius - 8;
+  const needleY = cy;
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(cx - 11, needleY - 20);
-  ctx.lineTo(cx + 11, needleY - 20);
-  ctx.lineTo(cx, needleY + 8);
+  ctx.moveTo(needleX + 18, needleY - 16);
+  ctx.lineTo(needleX + 18, needleY + 16);
+  ctx.lineTo(needleX - 8, needleY);
   ctx.closePath();
-  ctx.fillStyle = "#e53935";
+  ctx.fillStyle = "#00ffcc"; // لون مغاير تماماً (سماوي/فيروزي)
   ctx.fill();
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 2;
   ctx.stroke();
   ctx.restore();
 }
@@ -1291,7 +1272,6 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const HOLD_FRAMES = 6;
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
-    // توليد تدرجات اللون الوردي
     const pinkShades = generatePinkShades(num);
 
     const encoder = new GIFEncoder(size, size, "neuquant", true);
