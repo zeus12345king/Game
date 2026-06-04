@@ -83,30 +83,19 @@ async function downloadImage(url) {
 // دالة لتوليد تدرجات اللون الوردي الزهري حسب عدد اللاعبين
 function generatePinkShades(count) {
   const shades = [];
-  // لوحة ألوان وردية زهرية صريحة
-  const pinkPalette = [
-    "#FF69B4", // Hot Pink
-    "#FF85C0",
-    "#FF9FCC",
-    "#FFB6C1", // Light Pink
-    "#FFA0C5",
-    "#FF77B0",
-    "#FF6EB4",
-    "#FF8DA1",
-    "#FFC0CB", // Pink
-    "#FF99CC"
-  ];
+  const baseHue = 345;
+  const baseSaturation = 100;
+
   for (let i = 0; i < count; i++) {
-    shades.push(pinkPalette[i % pinkPalette.length]);
+    const lightness = 55 + (i * (30 / Math.max(count - 1, 1)));
+    shades.push(hslToHex(baseHue, baseSaturation, lightness));
   }
   return shades;
 }
 
-// تحويل HSL إلى HEX (لم تعد مستخدمة بشكل أساسي، ولكن تركت للتوافق)
 function hslToHex(h, s, l) {
-  s /= 100;
   l /= 100;
-  const a = s * Math.min(l, 1 - l);
+  const a = (s / 100) * Math.min(l, 1 - l);
   const f = (n) => {
     const k = (n + h / 30) % 12;
     const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
@@ -114,7 +103,7 @@ function hslToHex(h, s, l) {
       .toString(16)
       .padStart(2, "0");
   };
-  return `#${f(0)}${f(8)}${f(4)}`;
+  return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
 async function startGame(context, nowTime, callback) {
@@ -151,7 +140,12 @@ async function startGame(context, nowTime, callback) {
     .setEmoji(Z2_EMOJI)
     .setLabel("خروج")
     .setStyle(ButtonStyle.Secondary);
-  const actionRow = new ActionRowBuilder().addComponents(joinButton, exitButton);
+  const shopButton = new ButtonBuilder()
+    .setCustomId("open_shop_lobby")
+    .setEmoji("🛒")
+    .setLabel("المتجر")
+    .setStyle(ButtonStyle.Primary);
+  const actionRow = new ActionRowBuilder().addComponents(joinButton, exitButton, shopButton);
 
   const sendOptions = {
     content,
@@ -181,7 +175,7 @@ async function startGame(context, nowTime, callback) {
   const filter = (i) => {
     try {
       if (!i || !i.customId) return false;
-      return i.customId === "join" || i.customId === "exit";
+      return i.customId === "join" || i.customId === "exit" || i.customId === "open_shop_lobby";
     } catch (e) {
       return false;
     }
@@ -225,6 +219,80 @@ async function startGame(context, nowTime, callback) {
         players.splice(players.indexOf(removed), 1);
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
         await updateLobbyView();
+      } else if (i.customId === "open_shop_lobby") {
+        const chooserScore = await db.getUserPoints(i.user.id) || 0;
+        const costs = config.abilityCosts.roulette;
+        const playerInv = await inv.getItems(i.user.id);
+        const usedAbilities = new Set(); // في اللوبي لم تستخدم بعد
+
+        const shopItems = [
+          { id: "eliminate_nuclear", label: `نووي - يطرد الجميع`, cost: costs.nuclear, emoji: "☢️", style: ButtonStyle.Danger, used: usedAbilities.has("nuclear"), invKey: 'nuclear' },
+          { id: "ability_reverse",   label: `طرد عكسي`,           cost: costs.reverse,  emoji: "🔁", style: ButtonStyle.Secondary, used: usedAbilities.has("reverse"), invKey: 'reverse' },
+          { id: "ability_protect",   label: `حماية لاعب`,          cost: costs.protect,  emoji: "🛡️", style: ButtonStyle.Success, used: usedAbilities.has("protect"), invKey: 'protect' },
+          { id: "ability_freeze",    label: `تجميد لاعب`,          cost: costs.freeze,   emoji: "❄️", style: ButtonStyle.Secondary, used: usedAbilities.has("freeze"), invKey: 'freeze' },
+          { id: "eliminate_twice",   label: `طرد مرتين`,           cost: costs.twice,    emoji: "🔥", style: ButtonStyle.Secondary, used: usedAbilities.has("twice"), invKey: 'twice' },
+          { id: "eliminate_revive",  label: `إحياء لاعب`,          cost: costs.revive,   emoji: "🔄", style: ButtonStyle.Success, used: usedAbilities.has("revive"), invKey: 'revive', requireEliminated: true },
+        ];
+
+        const shopRows = [];
+        for (let s = 0; s < shopItems.length; s += 5) {
+          const row = new ActionRowBuilder();
+          shopItems.slice(s, s + 5).forEach(item => {
+            const canAfford = chooserScore >= item.cost;
+            const disabled = item.used || !canAfford;
+            const labelText = item.used
+              ? `${item.label} (مستخدم)`
+              : `${item.label} - ${item.cost}ن`;
+            row.addComponents(
+              new ButtonBuilder()
+                .setCustomId(item.id)
+                .setEmoji(item.emoji)
+                .setLabel(labelText.substring(0, 80))
+                .setStyle(item.style)
+                .setDisabled(disabled)
+            );
+          });
+          shopRows.push(row);
+        }
+
+        const shopDesc = shopItems.map(item => {
+          const status = item.used ? '✅ مستخدم' : chooserScore >= item.cost ? `${item.cost}ن` : `${item.cost}ن (ما يكفي)`;
+          return `${item.emoji} **${item.label}** — ${status}`;
+        }).join('\n');
+
+        const replyMessage = await i.reply({
+          content: `🛒 | **متجر القدرات** — رصيدك: **${chooserScore}ن**\n\n${shopDesc}`,
+          components: shopRows,
+          ephemeral: true,
+          fetchReply: true,
+        });
+
+        const shopCollector = replyMessage.createMessageComponentCollector({
+          filter: (shopI) => shopI.user.id === i.user.id,
+          time: 30000,
+        });
+
+        shopCollector.on("collect", async (shopI) => {
+          const chosenItem = shopItems.find(item => item.id === shopI.customId);
+          if (!chosenItem) return;
+          if (chosenItem.used) {
+            await shopI.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
+            return;
+          }
+          const currentPoints = await db.getUserPoints(i.user.id) || 0;
+          if (currentPoints < chosenItem.cost) {
+            await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
+            return;
+          }
+          await db.removePoints(i.user.id, chosenItem.cost);
+          await inv.addItem(i.user.id, chosenItem.invKey, 1);
+          await shopI.reply({ content: `✅ اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
+          shopCollector.stop();
+        });
+
+        shopCollector.on("end", () => {
+          replyMessage.edit({ components: [] }).catch(() => {});
+        });
       } else if (i.customId === "explain") {
         await i.reply({ content: "لا يوجد شرح متاح حالياً.", ephemeral: true });
       }
@@ -338,7 +406,7 @@ async function prepareRound(
       CURRENTLY_SENDING_IMAGE = true;
 
       try {
-        const { playerChosen, image } = await selectRandomPlayer(
+        const { playerChosen, image, duration } = await selectRandomPlayer(
           context,
           players
         );
@@ -347,7 +415,8 @@ async function prepareRound(
         const winnerIndex = players.findIndex(p => p.id === winner.id);
         const content = `**${winnerIndex + 1} -** <@${winner.id}>`;
         await context.channel.send({ content, files: [attachment] });
-        await sleep(3500); // أبطأ
+        // انتظر مدة GIF قبل المتابعة
+        await sleep(duration + 500); // أضف هامش
 
         // الحصول على النقاط القديمة والجديدة
         const oldPoints = await db.getUserPoints(winner.id) || 0;
@@ -408,7 +477,7 @@ async function prepareRound(
     CURRENTLY_SENDING_IMAGE = true;
 
     try {
-      const { playerChosen, image, chosenIndex } = await selectRandomPlayer(
+      const { playerChosen, image, duration } = await selectRandomPlayer(
         context,
         players
       );
@@ -431,7 +500,8 @@ async function prepareRound(
       const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
       const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
       const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
-      await sleep(3000); // أبطأ (كانت 2000)
+      // انتظر مدة GIF
+      await sleep(duration + 500);
       CURRENTLY_SENDING_IMAGE = false;
 
       if (playerChosen.isBot) {
@@ -497,29 +567,21 @@ async function prepareRound(
         targetRows.push(new ActionRowBuilder().addComponents(...comps));
       }
 
-      const actionButtons = [];
-      if (players.length > 2)
-        actionButtons.push(
-          new ButtonBuilder()
-            .setCustomId("eliminate_random")
-            .setEmoji("🎲")
-            .setLabel("طرد عشوائي")
-            .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
-        );
-
+      // بناء أزرار القدرات أولاً في صفوف منفصلة
+      const abilityButtons = [];
       const abilityDefs = [
-        { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '☢️', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
-        { invKey: 'reverse', cid: 'ability_reverse',   emoji: '🔁', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('reverse') },
-        { invKey: 'protect', cid: 'ability_protect',   emoji: '🛡️', label: 'حماية',      style: ButtonStyle.Success,   used: chooserUsedAbilities.has('protect') },
-        { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '❄️', label: 'تجميد',      style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('freeze') },
-        { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '🔥', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('twice') },
-        { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '🔄', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: chooserUsedAbilities.has('revive'), requireElim: true },
+        { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
+        { invKey: 'reverse', cid: 'ability_reverse',   emoji: '<:z8:1512222893772242953>', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('reverse') },
+        { invKey: 'protect', cid: 'ability_protect',   emoji: '<:z9:1512222953826160740>', label: 'حماية',      style: ButtonStyle.Success,   used: chooserUsedAbilities.has('protect') },
+        { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('freeze') },
+        { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('twice') },
+        { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: chooserUsedAbilities.has('revive'), requireElim: true },
       ];
 
       for (const ab of abilityDefs) {
         const owned = playerInv[ab.invKey] || 0;
         if (owned > 0 && !ab.used && (!ab.requireElim || eliminatedPlayers.length > 0)) {
-          actionButtons.push(
+          abilityButtons.push(
             new ButtonBuilder()
               .setCustomId(ab.cid)
               .setEmoji(ab.emoji)
@@ -529,33 +591,57 @@ async function prepareRound(
         }
       }
 
-      actionButtons.push(
+      // بناء صفوف القدرات (كل 5 أزرار)
+      const abilityRows = [];
+      for (let i = 0; i < abilityButtons.length; i += 5) {
+        abilityRows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
+      }
+
+      // صف أزرار الطرد العشوائي والانسحاب
+      const actionRowButtons = [];
+      if (players.length > 2) {
+        actionRowButtons.push(
+          new ButtonBuilder()
+            .setCustomId("eliminate_random")
+            .setEmoji("<:z5:1512126721367736481>")
+            .setLabel("طرد عشوائي")
+            .setStyle(ButtonStyle.Secondary)
+        );
+      }
+      actionRowButtons.push(
         new ButtonBuilder()
           .setCustomId("eliminate_withdraw")
-          .setEmoji("<:z6:1512127272184975360>") // تم تغيير الإيموجي إلى ↩️ ليتناسب مع "الانسحاب"
+          .setEmoji("<:z6:1512127272184975360>")
           .setLabel("الانسحاب")
           .setStyle(ButtonStyle.Secondary)
       );
 
-      for (let i = 0; i < actionButtons.length; i += 5) {
-        targetRows.push(
-          new ActionRowBuilder().addComponents(...actionButtons.slice(i, i + 5))
-        );
-      }
+      // دمج جميع الصفوف: targetRows, abilityRows, ثم actionRowButtons في صف واحد إن أمكن
+      const allRows = [
+        ...targetRows,
+        ...abilityRows,
+        new ActionRowBuilder().addComponents(...actionRowButtons),
+      ];
 
-      const collectorTimeout = 15000; // تم تثبيت الوقت على 15 ثانية
-      // إنشاء Embed وردي اللون للرسالة
+      // تقسيم الصفوف إلى رسالتين إذا تجاوزت 5 صفوف
+      const firstHalf = allRows.slice(0, 5);
+      const secondHalf = allRows.slice(5);
+
       const embed = new EmbedBuilder()
-        .setColor("#FF69B4") // لون وردي زهري
+        .setColor("#FFA2B8")
         .setDescription(`<:z5:1512126721367736481> | <@${randomPlayerId}> لديك **15 ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`);
 
-      const allRows = targetRows.slice(0, 5);
       const eliminationMessageA = await wheelMessage.reply({
         embeds: [embed],
-        components: allRows,
+        components: firstHalf,
       });
-      const eliminationMessageB = null;
-      const originalHalf = allRows.length;
+
+      let eliminationMessageB = null;
+      if (secondHalf.length > 0) {
+        eliminationMessageB = await context.channel.send({
+          components: secondHalf,
+        });
+      }
 
       const collectors = [];
       const eliminateFilter = (ii) =>
@@ -566,9 +652,12 @@ async function prepareRound(
       const createCollector = (msg) =>
         msg.createMessageComponentCollector({
           filter: eliminateFilter,
-          time: collectorTimeout,
+          time: 15000,
         });
       collectors.push(createCollector(eliminationMessageA));
+      if (eliminationMessageB) {
+        collectors.push(createCollector(eliminationMessageB));
+      }
 
       let kicktwice = { status: false, count: 0, firstTargetId: null };
       let playerHasWithdraw = false;
@@ -649,11 +738,11 @@ async function prepareRound(
 
           if (eliminationMessageA)
             await eliminationMessageA.edit({
-              components: updatedRows.slice(0, originalHalf),
+              components: updatedRows.slice(0, firstHalf.length),
             });
           if (eliminationMessageB)
             await eliminationMessageB.edit({
-              components: updatedRows.slice(originalHalf),
+              components: updatedRows.slice(firstHalf.length),
             });
 
           kicktwice.firstTargetId = targetId;
@@ -1223,8 +1312,8 @@ async function selectRandomPlayer(context, players) {
     const playerChosen = shuffled[0];
 
     const chosenId = playerChosen.id;
-    const imageBuffer = await createAnimatedRouletteGIF(shuffled, chosenId, context.guild);
-    return { playerChosen, image: imageBuffer, chosenIndex: chosenId };
+    const { buffer, duration } = await createAnimatedRouletteGIF(shuffled, chosenId, context.guild);
+    return { playerChosen, image: buffer, duration, chosenIndex: chosenId };
   } catch (err) {
     console.error("Error selecting random player:", err);
     const randomIndex = Math.floor(Math.random() * players.length);
@@ -1241,6 +1330,7 @@ async function selectRandomPlayer(context, players) {
     return {
       playerChosen,
       image: canvas.toBuffer("image/png"),
+      duration: 0,
       chosenIndex: playerChosen.id,
     };
   }
@@ -1254,7 +1344,10 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
   const num = shuffledMembers.length || 1;
   const anglePer = (2 * Math.PI) / num;
 
-  ctx.clearRect(0, 0, size, size);
+  // خلفية سوداء لجعلها شفافة لاحقًا عبر setTransparent
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, size, size);
+
   if (baseImage) {
     ctx.drawImage(baseImage, 0, 0, size, size);
   }
@@ -1317,7 +1410,7 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
   ctx.stroke();
   ctx.restore();
 
-  // إبرة من جهة اليمين (زاوية 0) - أكبر وأوضح
+  // إبرة من جهة اليمين (زاوية 0)
   const needleX = cx + wheelRadius - 8;
   const needleY = cy;
   ctx.save();
@@ -1349,40 +1442,53 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const anglePer = (2 * Math.PI) / num;
     const chosenIdx = shuffledMembers.findIndex((p) => p.id === chosenId);
 
-    const targetAngle = -(chosenIdx + 0.5) * anglePer;
+    // تصحيح: الإبرة عند الزاوية 0 (اليمين)، لذا نجعل مركز القطاع المختار عند 0
+    const targetAngle = Math.PI/2 - (chosenIdx + 0.5) * anglePer;
     const totalRotation = targetAngle + 7 * 2 * Math.PI;
 
-    const SPIN_FRAMES = 90; // زيدت الإطارات
-    const HOLD_FRAMES = 10; // زيدت إطارات التوقف
+    const SPIN_FRAMES = 90;
+    const HOLD_FRAMES = 10;
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
     const pinkShades = generatePinkShades(num);
 
+    // إعدادات أبطأ
+    const earlyDelay = 50; // كان 30
+    const lateDelayMultiplier = 180; // كان 120
+    const holdDelay = 3000; // كان 2000
+
     const encoder = new GIFEncoder(size, size, "neuquant", true);
     encoder.setRepeat(-1);
     encoder.setQuality(3);
+    encoder.setTransparent(0x000000); // جعل الأسود شفافاً (الخلفية)
     encoder.start();
 
     const canvas = createCanvas(size, size);
     const ctx = canvas.getContext("2d");
 
+    let totalDuration = 0;
+
     for (let f = 0; f < SPIN_FRAMES; f++) {
       const t = f / (SPIN_FRAMES - 1);
       const easedT = easeOut(t);
       const currentRotation = totalRotation * easedT;
-      encoder.setDelay(f < SPIN_FRAMES * 0.4 ? 30 : Math.round(30 + (f / SPIN_FRAMES) * 120)); // أبطأ
+      const delay = f < SPIN_FRAMES * 0.4 ? earlyDelay : Math.round(30 + (f / SPIN_FRAMES) * lateDelayMultiplier);
+      encoder.setDelay(delay);
+      totalDuration += delay;
       drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, currentRotation, false, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
     }
 
-    encoder.setDelay(2000); // أبطأ
+    encoder.setDelay(holdDelay);
+    totalDuration += holdDelay * HOLD_FRAMES;
     for (let h = 0; h < HOLD_FRAMES; h++) {
       drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, totalRotation, true, guildIcon, pinkShades);
       encoder.addFrame(ctx.getImageData(0, 0, size, size).data);
     }
 
     encoder.finish();
-    return Buffer.from(encoder.out.getData());
+    const buffer = Buffer.from(encoder.out.getData());
+    return { buffer, duration: totalDuration };
   } catch (err) {
     console.error("createAnimatedRouletteGIF() failed:", err);
     const fallback = createCanvas(300, 300);
@@ -1393,7 +1499,7 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     fctx.font = "20px IBM";
     fctx.textAlign = "center";
     fctx.fillText("تم اختيار لاعب", 150, 140);
-    return fallback.toBuffer("image/png");
+    return { buffer: fallback.toBuffer("image/png"), duration: 0 };
   }
 }
 
