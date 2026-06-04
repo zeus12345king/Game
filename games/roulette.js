@@ -3,6 +3,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   AttachmentBuilder,
+  EmbedBuilder,
   MessageFlags,
 } = require("discord.js");
 const db = require("../database.js");
@@ -32,7 +33,7 @@ const Z1_EMOJI = "<:z1:1511780346008436946>";
 const Z2_EMOJI = "<:z2:1511780387506880542>";
 const Z3_EMOJI = "<:z3:1511872921142825040>";
 
-// عدد البوتات الوهمية المطلوب إضافتها
+// عدد البوتات الوهمية المطلوب إضافتها عند اللزوم
 const BOT_COUNT = 8;
 
 let CURRENTLY_SENDING_IMAGE = false;
@@ -79,19 +80,29 @@ async function downloadImage(url) {
   });
 }
 
-// دالة لتوليد تدرجات اللون الوردي حسب عدد اللاعبين
+// دالة لتوليد تدرجات اللون الوردي الزهري حسب عدد اللاعبين
 function generatePinkShades(count) {
   const shades = [];
-  const baseHue = 340;
+  // لوحة ألوان وردية زهرية صريحة
+  const pinkPalette = [
+    "#FF69B4", // Hot Pink
+    "#FF85C0",
+    "#FF9FCC",
+    "#FFB6C1", // Light Pink
+    "#FFA0C5",
+    "#FF77B0",
+    "#FF6EB4",
+    "#FF8DA1",
+    "#FFC0CB", // Pink
+    "#FF99CC"
+  ];
   for (let i = 0; i < count; i++) {
-    const saturation = 60 + (i % 5) * 8;
-    const lightness = 35 + (i % 7) * 7;
-    shades.push(hslToHex(baseHue, saturation, lightness));
+    shades.push(pinkPalette[i % pinkPalette.length]);
   }
   return shades;
 }
 
-// تحويل HSL إلى HEX
+// تحويل HSL إلى HEX (لم تعد مستخدمة بشكل أساسي، ولكن تركت للتوافق)
 function hslToHex(h, s, l) {
   s /= 100;
   l /= 100;
@@ -228,9 +239,9 @@ async function startGame(context, nowTime, callback) {
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
-      // إضافة بوتات وهمية إلى أن يصل العدد الإجمالي إلى BOT_COUNT (8)
+      // التعديل الجديد: إضافة بوتات وهمية فقط إذا كان عدد اللاعبين أقل من 2 (0 أو 1)
       const totalPlayersNeeded = BOT_COUNT;
-      if (players.length < totalPlayersNeeded) {
+      if (players.length < 2) {
         const botsToAdd = totalPlayersNeeded - players.length;
         let maxIndex = players.length > 0 ? Math.max(...players.map(p => p.index)) : -1;
         for (let i = 0; i < botsToAdd; i++) {
@@ -521,9 +532,9 @@ async function prepareRound(
       actionButtons.push(
         new ButtonBuilder()
           .setCustomId("eliminate_withdraw")
-          .setEmoji("<:Gleave:1285563197092401214>")
+          .setEmoji("↩️") // تم تغيير الإيموجي إلى ↩️ ليتناسب مع "الانسحاب"
           .setLabel("الانسحاب")
-          .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
+          .setStyle(ButtonStyle.Secondary)
       );
 
       for (let i = 0; i < actionButtons.length; i += 5) {
@@ -532,12 +543,15 @@ async function prepareRound(
         );
       }
 
-      const collectorTimeout = eliminatedPlayers.length > 0 ? 15000 : 25000;
-      const contentMsg = `🎲 | <@${randomPlayerId}> لديك **${collectorTimeout / 1000} ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`;
+      const collectorTimeout = 15000; // تم تثبيت الوقت على 15 ثانية
+      // إنشاء Embed وردي اللون للرسالة
+      const embed = new EmbedBuilder()
+        .setColor("#FF69B4") // لون وردي زهري
+        .setDescription(`🎲 | <@${randomPlayerId}> لديك **15 ثانية** لاختيار لاعب لطرده، او يمكنك استخدام قدرة.`);
 
       const allRows = targetRows.slice(0, 5);
       const eliminationMessageA = await wheelMessage.reply({
-        content: contentMsg,
+        embeds: [embed],
         components: allRows,
       });
       const eliminationMessageB = null;
@@ -1395,7 +1409,6 @@ async function win(playerId, context) {
     const points = getRandomWinPoints();
     await db.addPoints(playerId, points);
     console.log(`[Roulette] Gave ${points} points to winner ${playerId}`);
-    // حذف إرسال رسالة النقاط القديمة
   } catch (e) {
     console.error(`[Roulette] Failed to apply win points: ${e}`);
   }
