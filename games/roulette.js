@@ -243,9 +243,9 @@ async function startGame(context, nowTime, callback) {
         ];
 
         const shopRows = [];
-        for (let s = 0; s < shopItems.length; s += 5) {
+        for (let s = 0; s < shopItems.length; s += 3) {
           const row = new ActionRowBuilder();
-          shopItems.slice(s, s + 5).forEach(item => {
+          shopItems.slice(s, s + 3).forEach(item => {
             const canAfford = chooserScore >= item.cost;
             const disabled = item.used || !canAfford;
             const labelText = item.used
@@ -851,9 +851,9 @@ async function prepareRound(
               const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
               const shopRows = [];
-              for (let s = 0; s < shopItems.length; s += 5) {
+              for (let s = 0; s < shopItems.length; s += 3) {
                 const row = new ActionRowBuilder();
-                shopItems.slice(s, s + 5).forEach(item => {
+                shopItems.slice(s, s + 3).forEach(item => {
                   const canAfford = chooserScore >= item.cost;
                   const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
                   const disabled = item.used || !canAfford || !hasElim;
