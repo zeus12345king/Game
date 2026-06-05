@@ -35,7 +35,7 @@ module.exports = {
 
   // صور المتجر لكل لعبة (اختياري)
   shopImages: {
-    roulette: 'img/roulette_shop.jpeg',
+    roulette: 'img/roulette_shop⁩.png',
   },
 
    // الاوان تبع الشريط الجانبي للأمبيد v2
