@@ -220,18 +220,45 @@ async function startGame(context, nowTime, callback) {
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
         await updateLobbyView();
       } else if (i.customId === "open_shop_lobby") {
+        // عرض المتجر بصورة خاصة مع أزرار رمادية
         const chooserScore = await db.getUserPoints(i.user.id) || 0;
         const costs = config.abilityCosts.roulette;
         const playerInv = await inv.getItems(i.user.id);
         const usedAbilities = new Set(); // في اللوبي لم تستخدم بعد
 
+        // تجهيز صورة المتجر إن وجدت
+        let shopImageFile = null;
+        const shopImg = config.shopImages?.roulette;
+        if (shopImg) {
+          try {
+            if (shopImg.startsWith("http://") || shopImg.startsWith("https://")) {
+              const buffer = await downloadImage(shopImg);
+              shopImageFile = new AttachmentBuilder(buffer, { name: "shop.png" });
+            } else {
+              shopImageFile = new AttachmentBuilder(shopImg, { name: path.basename(shopImg) });
+            }
+          } catch (e) {
+            console.error("Failed to load shop image:", e);
+          }
+        }
+
+        // تعريف القدرات مع الإيموجيات الرسمية للعبة
+        const abilityEmojis = {
+          nuclear: '<:z7:1512214884421734400>',
+          reverse: '<:z8:1512222893772242953>',
+          protect: '<:z9:1512222953826160740>',
+          freeze: '<:z10:1512223654014881852>',
+          twice: '<:z11:1512224011357126948>',
+          revive: '<:z12:1512224063819485334>',
+        };
+
         const shopItems = [
-          { id: "eliminate_nuclear", label: `نووي - يطرد الجميع`, cost: costs.nuclear, emoji: "☢️", style: ButtonStyle.Danger, used: usedAbilities.has("nuclear"), invKey: 'nuclear' },
-          { id: "ability_reverse",   label: `طرد عكسي`,           cost: costs.reverse,  emoji: "🔁", style: ButtonStyle.Secondary, used: usedAbilities.has("reverse"), invKey: 'reverse' },
-          { id: "ability_protect",   label: `حماية لاعب`,          cost: costs.protect,  emoji: "🛡️", style: ButtonStyle.Success, used: usedAbilities.has("protect"), invKey: 'protect' },
-          { id: "ability_freeze",    label: `تجميد لاعب`,          cost: costs.freeze,   emoji: "❄️", style: ButtonStyle.Secondary, used: usedAbilities.has("freeze"), invKey: 'freeze' },
-          { id: "eliminate_twice",   label: `طرد مرتين`,           cost: costs.twice,    emoji: "🔥", style: ButtonStyle.Secondary, used: usedAbilities.has("twice"), invKey: 'twice' },
-          { id: "eliminate_revive",  label: `إحياء لاعب`,          cost: costs.revive,   emoji: "🔄", style: ButtonStyle.Success, used: usedAbilities.has("revive"), invKey: 'revive', requireEliminated: true },
+          { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear", used: usedAbilities.has("nuclear") },
+          { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse", used: usedAbilities.has("reverse") },
+          { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect", used: usedAbilities.has("protect") },
+          { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze", used: usedAbilities.has("freeze") },
+          { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice", used: usedAbilities.has("twice") },
+          { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: usedAbilities.has("revive"), requireEliminated: true },
         ];
 
         const shopRows = [];
@@ -246,26 +273,25 @@ async function startGame(context, nowTime, callback) {
             row.addComponents(
               new ButtonBuilder()
                 .setCustomId(item.id)
-                .setEmoji(item.emoji)
+                .setEmoji(abilityEmojis[item.invKey] || "❓")
                 .setLabel(labelText.substring(0, 80))
-                .setStyle(item.style)
+                .setStyle(ButtonStyle.Secondary) // جميع الأزرار رمادية
                 .setDisabled(disabled)
             );
           });
           shopRows.push(row);
         }
 
-        const shopDesc = shopItems.map(item => {
-          const status = item.used ? '✅ مستخدم' : chooserScore >= item.cost ? `${item.cost}ن` : `${item.cost}ن (ما يكفي)`;
-          return `${item.emoji} **${item.label}** — ${status}`;
-        }).join('\n');
-
-        const replyMessage = await i.reply({
-          content: `🛒 | **متجر القدرات** — رصيدك: **${chooserScore}ن**\n\n${shopDesc}`,
+        // إرسال الصورة (إن وجدت) مع الأزرار كرسالة مؤقتة
+        const replyPayload = {
+          content: `🛒 | رصيدك: **${chooserScore}ن**`,
           components: shopRows,
           ephemeral: true,
           fetchReply: true,
-        });
+        };
+        if (shopImageFile) replyPayload.files = [shopImageFile];
+
+        const replyMessage = await i.reply(replyPayload);
 
         const shopCollector = replyMessage.createMessageComponentCollector({
           filter: (shopI) => shopI.user.id === i.user.id,
@@ -500,7 +526,7 @@ async function prepareRound(
       const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
       const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
       const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
-      // انتظر مدة GIF
+      // انتظر مدة GIF بالضبط ثم أظهر أزرار الاختيار فوراً
       await sleep(duration + 500);
       CURRENTLY_SENDING_IMAGE = false;
 
@@ -837,14 +863,38 @@ async function prepareRound(
             const cid = ii.customId;
 
             if (cid === "open_shop") {
+              // عرض المتجر بصورة خاصة (أثناء اللعب)
+              const abilityEmojis = {
+                nuclear: '<:z7:1512214884421734400>',
+                reverse: '<:z8:1512222893772242953>',
+                protect: '<:z9:1512222953826160740>',
+                freeze: '<:z10:1512223654014881852>',
+                twice: '<:z11:1512224011357126948>',
+                revive: '<:z12:1512224063819485334>',
+              };
               const shopItems = [
-                { id: "eliminate_nuclear", label: `نووي - يطرد الجميع`, cost: costs.nuclear, emoji: "☢️", style: ButtonStyle.Danger, used: chooserUsedAbilities.has("nuclear") },
-                { id: "ability_reverse",   label: `طرد عكسي`,           cost: costs.reverse,  emoji: "🔁", style: ButtonStyle.Secondary, used: chooserUsedAbilities.has("reverse") },
-                { id: "ability_protect",   label: `حماية لاعب`,          cost: costs.protect,  emoji: "🛡️", style: ButtonStyle.Success, used: chooserUsedAbilities.has("protect") },
-                { id: "ability_freeze",    label: `تجميد لاعب`,          cost: costs.freeze,   emoji: "❄️", style: ButtonStyle.Secondary, used: chooserUsedAbilities.has("freeze") },
-                { id: "eliminate_twice",   label: `طرد مرتين`,           cost: costs.twice,    emoji: "🔥", style: ButtonStyle.Secondary, used: chooserUsedAbilities.has("twice") },
-                { id: "eliminate_revive",  label: `إحياء لاعب`,          cost: costs.revive,   emoji: "🔄", style: ButtonStyle.Success, used: chooserUsedAbilities.has("revive"), requireEliminated: true },
+                { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear", used: chooserUsedAbilities.has("nuclear") },
+                { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse", used: chooserUsedAbilities.has("reverse") },
+                { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect", used: chooserUsedAbilities.has("protect") },
+                { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze", used: chooserUsedAbilities.has("freeze") },
+                { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice", used: chooserUsedAbilities.has("twice") },
+                { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: chooserUsedAbilities.has("revive"), requireEliminated: true },
               ];
+
+              let shopImageFile = null;
+              const shopImg = config.shopImages?.roulette;
+              if (shopImg) {
+                try {
+                  if (shopImg.startsWith("http://") || shopImg.startsWith("https://")) {
+                    const buffer = await downloadImage(shopImg);
+                    shopImageFile = new AttachmentBuilder(buffer, { name: "shop.png" });
+                  } else {
+                    shopImageFile = new AttachmentBuilder(shopImg, { name: path.basename(shopImg) });
+                  }
+                } catch (e) {
+                  console.error("Failed to load shop image:", e);
+                }
+              }
 
               const shopRows = [];
               for (let s = 0; s < shopItems.length; s += 5) {
@@ -859,25 +909,23 @@ async function prepareRound(
                   row.addComponents(
                     new ButtonBuilder()
                       .setCustomId(item.id)
-                      .setEmoji(item.emoji)
+                      .setEmoji(abilityEmojis[item.invKey] || "❓")
                       .setLabel(labelText.substring(0, 80))
-                      .setStyle(item.style)
+                      .setStyle(ButtonStyle.Secondary) // جميع الأزرار رمادية
                       .setDisabled(disabled)
                   );
                 });
                 shopRows.push(row);
               }
 
-              const shopDesc = shopItems.map(item => {
-                const status = item.used ? '✅ مستخدم' : chooserScore >= item.cost ? `${item.cost}ن` : `${item.cost}ن (ما يكفي)`;
-                return `${item.emoji} **${item.label}** — ${status}`;
-              }).join('\n');
-
-              await ii.reply({
-                content: `🛒 | **متجر القدرات** — رصيدك: **${chooserScore}ن**\n\n${shopDesc}`,
+              const replyPayload = {
+                content: `🛒 | رصيدك: **${chooserScore}ن**`,
                 components: shopRows,
                 ephemeral: true,
-              });
+              };
+              if (shopImageFile) replyPayload.files = [shopImageFile];
+
+              await ii.reply(replyPayload);
               voteTaken = false;
               return;
             }
@@ -1447,15 +1495,15 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const totalRotation = targetAngle + 7 * 2 * Math.PI;
 
     const SPIN_FRAMES = 90;
-    const HOLD_FRAMES = 10;
+    const HOLD_FRAMES = 3;   // تقليل وقت التثبيت ليصبح قصيراً بعد التوقف
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
     const pinkShades = generatePinkShades(num);
 
-    // إعدادات أبطأ
-    const earlyDelay = 40; // كان 30
-    const lateDelayMultiplier = 160; // كان 120
-    const holdDelay = 2300; // كان 2000
+    // سرعة الدوران بطيئة (لا تغيير هنا)
+    const earlyDelay = 40;
+    const lateDelayMultiplier = 160;
+    const holdDelay = 1500;  // كل إطار تثبيت 1.5 ثانية
 
     const encoder = new GIFEncoder(size, size, "neuquant", true);
     encoder.setRepeat(-1);
