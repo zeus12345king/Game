@@ -250,7 +250,7 @@ async function startGame(context, nowTime, callback) {
             const disabled = item.used || !canAfford;
             const labelText = item.used
               ? `${item.label} (مستخدم)`
-              : `${item.label} - ${item.cost}ن`;
+              : item.label;
             row.addComponents(
               new ButtonBuilder()
                 .setCustomId(item.id)
@@ -264,7 +264,7 @@ async function startGame(context, nowTime, callback) {
         }
 
         const replyPayload = {
-          content: `🛒 | رصيدك: **${chooserScore}ن**`,
+          content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
           components: shopRows,
           ephemeral: true,
           fetchReply: true,
@@ -292,7 +292,7 @@ async function startGame(context, nowTime, callback) {
           }
           await db.removePoints(i.user.id, chosenItem.cost);
           await inv.addItem(i.user.id, chosenItem.invKey, 1);
-          await shopI.reply({ content: `✅ اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
+          await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
           shopCollector.stop();
         });
 
@@ -859,7 +859,7 @@ async function prepareRound(
                   const disabled = item.used || !canAfford || !hasElim;
                   const labelText = item.used
                     ? `${item.label} (مستخدم)`
-                    : `${item.label} - ${item.cost}ن`;
+                    : item.label;
                   row.addComponents(
                     new ButtonBuilder()
                       .setCustomId(item.id)
