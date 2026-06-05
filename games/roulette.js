@@ -33,7 +33,6 @@ const Z1_EMOJI = "<:z1:1511780346008436946>";
 const Z2_EMOJI = "<:z2:1511780387506880542>";
 const Z3_EMOJI = "<:z3:1511872921142825040>";
 
-// عدد البوتات الوهمية المطلوب إضافتها عند اللزوم
 const BOT_COUNT = 8;
 
 let CURRENTLY_SENDING_IMAGE = false;
@@ -63,7 +62,22 @@ function clampLabel(s, max = 80) {
   return s.length > max ? s.slice(0, max - 2) + ".." : s;
 }
 
-// دالة لتحميل الصورة من رابط خارجي إلى Buffer
+// دالة موحدة لتحميل صورة (رابط خارجي أو مسار محلي) وإرجاع AttachmentBuilder
+async function loadGameImage(imagePathOrUrl, fallbackFileName = "image.png") {
+  if (!imagePathOrUrl) return null;
+  try {
+    if (imagePathOrUrl.startsWith("http://") || imagePathOrUrl.startsWith("https://")) {
+      const buffer = await downloadImage(imagePathOrUrl);
+      return new AttachmentBuilder(buffer, { name: fallbackFileName });
+    } else {
+      return new AttachmentBuilder(imagePathOrUrl, { name: path.basename(imagePathOrUrl) });
+    }
+  } catch (e) {
+    console.error(`Failed to load image from ${imagePathOrUrl}:`, e);
+    return null;
+  }
+}
+
 async function downloadImage(url) {
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith("https") ? https : http;
@@ -80,7 +94,6 @@ async function downloadImage(url) {
   });
 }
 
-// دالة لتوليد تدرجات اللون الوردي الزهري حسب عدد اللاعبين
 function generatePinkShades(count) {
   const shades = [];
   const baseHue = 345;
@@ -112,23 +125,7 @@ async function startGame(context, nowTime, callback) {
 
   let content = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
 
-  let lobbyImageFile = null;
-  const img = config.lobbyImages.roulette;
-  if (img) {
-    try {
-      if (
-        img.startsWith("http://") ||
-        img.startsWith("https://")
-      ) {
-        const buffer = await downloadImage(img);
-        lobbyImageFile = new AttachmentBuilder(buffer, { name: "lobby.png" });
-      } else {
-        lobbyImageFile = new AttachmentBuilder(img, { name: path.basename(img) });
-      }
-    } catch (e) {
-      console.error("Failed to load lobby image:", e);
-    }
-  }
+  const lobbyImageFile = await loadGameImage(config.lobbyImages.roulette, "lobby.png");
 
   const joinButton = new ButtonBuilder()
     .setCustomId("join")
@@ -220,29 +217,13 @@ async function startGame(context, nowTime, callback) {
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
         await updateLobbyView();
       } else if (i.customId === "open_shop_lobby") {
-        // عرض المتجر بصورة خاصة مع أزرار رمادية
         const chooserScore = await db.getUserPoints(i.user.id) || 0;
         const costs = config.abilityCosts.roulette;
         const playerInv = await inv.getItems(i.user.id);
-        const usedAbilities = new Set(); // في اللوبي لم تستخدم بعد
+        const usedAbilities = new Set();
 
-        // تجهيز صورة المتجر إن وجدت
-        let shopImageFile = null;
-        const shopImg = config.shopImages?.roulette;
-        if (shopImg) {
-          try {
-            if (shopImg.startsWith("http://") || shopImg.startsWith("https://")) {
-              const buffer = await downloadImage(shopImg);
-              shopImageFile = new AttachmentBuilder(buffer, { name: "shop.png" });
-            } else {
-              shopImageFile = new AttachmentBuilder(shopImg, { name: path.basename(shopImg) });
-            }
-          } catch (e) {
-            console.error("Failed to load shop image:", e);
-          }
-        }
+        const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
-        // تعريف القدرات مع الإيموجيات الرسمية للعبة
         const abilityEmojis = {
           nuclear: '<:z7:1512214884421734400>',
           reverse: '<:z8:1512222893772242953>',
@@ -275,14 +256,13 @@ async function startGame(context, nowTime, callback) {
                 .setCustomId(item.id)
                 .setEmoji(abilityEmojis[item.invKey] || "❓")
                 .setLabel(labelText.substring(0, 80))
-                .setStyle(ButtonStyle.Secondary) // جميع الأزرار رمادية
+                .setStyle(ButtonStyle.Secondary)
                 .setDisabled(disabled)
             );
           });
           shopRows.push(row);
         }
 
-        // إرسال الصورة (إن وجدت) مع الأزرار كرسالة مؤقتة
         const replyPayload = {
           content: `🛒 | رصيدك: **${chooserScore}ن**`,
           components: shopRows,
@@ -333,7 +313,6 @@ async function startGame(context, nowTime, callback) {
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
-      // التعديل الجديد: إضافة بوتات وهمية فقط إذا كان عدد اللاعبين أقل من 2 (0 أو 1)
       const totalPlayersNeeded = BOT_COUNT;
       if (players.length < 2) {
         const botsToAdd = totalPlayersNeeded - players.length;
@@ -365,7 +344,7 @@ async function startGame(context, nowTime, callback) {
 
       let eliminatedPlayers = [];
       await sentMessage.reply(`${Z3_EMOJI} | تم الانتهاء من تسجيل اللاعبين، ستبدأ الجولة الاولى بعد قليل...`);
-      await sleep(4500); // زيدت أكثر
+      await sleep(4500);
       await prepareRound(context, players, eliminatedPlayers, context.client, callback);
     } catch (err) {
       console.error("Error ending lobby collector:", err);
@@ -384,7 +363,7 @@ async function prepareRound(
 ) {
   try {
     const currentTime = Date.now();
-    if (currentTime - LAST_ROUND_TIME < 6000) { // زيد وقت الانتظار
+    if (currentTime - LAST_ROUND_TIME < 6000) {
       await sleep(6000 - (currentTime - LAST_ROUND_TIME));
     }
     LAST_ROUND_TIME = Date.now();
@@ -401,13 +380,11 @@ async function prepareRound(
         return;
       }
 
-      // الحصول على النقاط القديمة والجديدة
       const oldPoints = await db.getUserPoints(winner.id) || 0;
       const pointsToAdd = getRandomWinPoints();
       const newPoints = oldPoints + pointsToAdd;
       await db.addPoints(winner.id, pointsToAdd);
 
-      // زر العرض المعطل
       const pointsButton = new ButtonBuilder()
         .setCustomId('winner_points_display')
         .setEmoji('🍪')
@@ -417,7 +394,7 @@ async function prepareRound(
 
       const row = new ActionRowBuilder().addComponents(pointsButton);
 
-      await sleep(3500); // أبطأ
+      await sleep(3500);
       await context.channel.send({
         content: `# 👑 - <@${winner.id}> فاز باللعبة!`,
         components: [row],
@@ -441,16 +418,13 @@ async function prepareRound(
         const winnerIndex = players.findIndex(p => p.id === winner.id);
         const content = `**${winnerIndex + 1} -** <@${winner.id}>`;
         await context.channel.send({ content, files: [attachment] });
-        // انتظر مدة GIF قبل المتابعة
-        await sleep(duration + 500); // أضف هامش
+        await sleep(duration + 500);
 
-        // الحصول على النقاط القديمة والجديدة
         const oldPoints = await db.getUserPoints(winner.id) || 0;
         const pointsToAdd = getRandomWinPoints();
         const newPoints = oldPoints + pointsToAdd;
         await db.addPoints(winner.id, pointsToAdd);
 
-        // زر العرض المعطل
         const pointsButton = new ButtonBuilder()
           .setCustomId('winner_points_display')
           .setEmoji('🍪')
@@ -460,7 +434,7 @@ async function prepareRound(
 
         const row = new ActionRowBuilder().addComponents(pointsButton);
 
-        await sleep(2500); // أبطأ
+        await sleep(2500);
         await context.channel.send({
           content: `# 👑 - <@${winner.id}> فاز باللعبة!`,
           components: [row],
@@ -526,7 +500,6 @@ async function prepareRound(
       const chosenPlayerIndex = players.findIndex(p => p.id === randomPlayerId);
       const wheelContent = `**${chosenPlayerIndex + 1} -** <@${randomPlayerId}>`;
       const wheelMessage = await context.channel.send({ content: wheelContent, files: [attachment] });
-      // انتظر مدة GIF بالضبط ثم أظهر أزرار الاختيار فوراً
       await sleep(duration + 500);
       CURRENTLY_SENDING_IMAGE = false;
 
@@ -537,7 +510,7 @@ async function prepareRound(
           return;
         }
         const botTarget = botTargets[Math.floor(Math.random() * botTargets.length)];
-        await sleep(3000); // أبطأ (كانت 2000)
+        await sleep(3000);
         await context.channel.send(`🤖 | **${playerChosen.username}** قرر طرد <@${botTarget.id}> عشوائياً!`);
         await lose(botTarget.id, context);
         eliminatedPlayers.push(botTarget);
@@ -593,7 +566,6 @@ async function prepareRound(
         targetRows.push(new ActionRowBuilder().addComponents(...comps));
       }
 
-      // بناء أزرار القدرات أولاً في صفوف منفصلة
       const abilityButtons = [];
       const abilityDefs = [
         { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
@@ -617,13 +589,11 @@ async function prepareRound(
         }
       }
 
-      // بناء صفوف القدرات (كل 5 أزرار)
       const abilityRows = [];
       for (let i = 0; i < abilityButtons.length; i += 5) {
         abilityRows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
       }
 
-      // صف أزرار الطرد العشوائي والانسحاب
       const actionRowButtons = [];
       if (players.length > 2) {
         actionRowButtons.push(
@@ -642,14 +612,12 @@ async function prepareRound(
           .setStyle(ButtonStyle.Secondary)
       );
 
-      // دمج جميع الصفوف: targetRows, abilityRows, ثم actionRowButtons في صف واحد إن أمكن
       const allRows = [
         ...targetRows,
         ...abilityRows,
         new ActionRowBuilder().addComponents(...actionRowButtons),
       ];
 
-      // تقسيم الصفوف إلى رسالتين إذا تجاوزت 5 صفوف
       const firstHalf = allRows.slice(0, 5);
       const secondHalf = allRows.slice(5);
 
@@ -863,7 +831,6 @@ async function prepareRound(
             const cid = ii.customId;
 
             if (cid === "open_shop") {
-              // عرض المتجر بصورة خاصة (أثناء اللعب)
               const abilityEmojis = {
                 nuclear: '<:z7:1512214884421734400>',
                 reverse: '<:z8:1512222893772242953>',
@@ -881,20 +848,7 @@ async function prepareRound(
                 { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: chooserUsedAbilities.has("revive"), requireEliminated: true },
               ];
 
-              let shopImageFile = null;
-              const shopImg = config.shopImages?.roulette;
-              if (shopImg) {
-                try {
-                  if (shopImg.startsWith("http://") || shopImg.startsWith("https://")) {
-                    const buffer = await downloadImage(shopImg);
-                    shopImageFile = new AttachmentBuilder(buffer, { name: "shop.png" });
-                  } else {
-                    shopImageFile = new AttachmentBuilder(shopImg, { name: path.basename(shopImg) });
-                  }
-                } catch (e) {
-                  console.error("Failed to load shop image:", e);
-                }
-              }
+              const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
               const shopRows = [];
               for (let s = 0; s < shopItems.length; s += 5) {
@@ -911,7 +865,7 @@ async function prepareRound(
                       .setCustomId(item.id)
                       .setEmoji(abilityEmojis[item.invKey] || "❓")
                       .setLabel(labelText.substring(0, 80))
-                      .setStyle(ButtonStyle.Secondary) // جميع الأزرار رمادية
+                      .setStyle(ButtonStyle.Secondary)
                       .setDisabled(disabled)
                   );
                 });
@@ -1247,7 +1201,7 @@ async function prepareRound(
       await context.channel.send(
         "حدث خطأ أثناء اختيار اللاعب. سيتم اختيار لاعب عشوائي للمتابعة."
       );
-      await sleep(4500); // أبطأ
+      await sleep(4500);
       await prepareRound(
         context,
         players,
@@ -1392,7 +1346,6 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
   const num = shuffledMembers.length || 1;
   const anglePer = (2 * Math.PI) / num;
 
-  // خلفية سوداء لجعلها شفافة لاحقًا عبر setTransparent
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, size, size);
 
@@ -1418,7 +1371,6 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
     ctx.closePath();
     ctx.fillStyle = baseColor;
     ctx.fill();
-    // فواصل بيضاء بين اللاعبين
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2.5;
     ctx.stroke();
@@ -1442,7 +1394,6 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
 
   ctx.restore();
 
-  // الدائرة الداخلية
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
@@ -1458,7 +1409,6 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
   ctx.stroke();
   ctx.restore();
 
-  // إبرة من جهة اليمين (زاوية 0)
   const needleX = cx + wheelRadius - 8;
   const needleY = cy;
   ctx.save();
@@ -1467,7 +1417,7 @@ function drawWheelFrame(ctx, size, baseImage, shuffledMembers, chosenId, rotatio
   ctx.lineTo(needleX + 18, needleY + 16);
   ctx.lineTo(needleX - 8, needleY);
   ctx.closePath();
-  ctx.fillStyle = "#00ffcc"; // لون مغاير تماماً (سماوي/فيروزي)
+  ctx.fillStyle = "#00ffcc";
   ctx.fill();
   ctx.strokeStyle = "#000000";
   ctx.lineWidth = 2;
@@ -1490,25 +1440,23 @@ async function createAnimatedRouletteGIF(shuffledMembers, chosenId, guild) {
     const anglePer = (2 * Math.PI) / num;
     const chosenIdx = shuffledMembers.findIndex((p) => p.id === chosenId);
 
-    // تصحيح: الإبرة عند الزاوية 0 (اليمين)، لذا نجعل مركز القطاع المختار عند 0
     const targetAngle = Math.PI/2 - (chosenIdx + 0.5) * anglePer;
     const totalRotation = targetAngle + 7 * 2 * Math.PI;
 
     const SPIN_FRAMES = 90;
-    const HOLD_FRAMES = 3;   // تقليل وقت التثبيت ليصبح قصيراً بعد التوقف
+    const HOLD_FRAMES = 3;
     const easeOut = (t) => 1 - Math.pow(1 - t, 4);
 
     const pinkShades = generatePinkShades(num);
 
-    // سرعة الدوران بطيئة (لا تغيير هنا)
     const earlyDelay = 40;
     const lateDelayMultiplier = 160;
-    const holdDelay = 1500;  // كل إطار تثبيت 1.5 ثانية
+    const holdDelay = 1500;
 
     const encoder = new GIFEncoder(size, size, "neuquant", true);
     encoder.setRepeat(-1);
     encoder.setQuality(3);
-    encoder.setTransparent(0x000000); // جعل الأسود شفافاً (الخلفية)
+    encoder.setTransparent(0x000000);
     encoder.start();
 
     const canvas = createCanvas(size, size);
@@ -1558,7 +1506,6 @@ function getRandomWinPoints() {
 }
 
 async function win(playerId, context) {
-  // لم تعد ترسل رسالة منفصلة، فقط تضيف النقاط
   try {
     const points = getRandomWinPoints();
     await db.addPoints(playerId, points);
