@@ -19,9 +19,9 @@ const { connectMongo } = require('./db/mongo.js');
 const config = require('./config.js');
 const settings = require('./settings.js');
 const db = require('./database.js');
+const sessionManager = require('./core/sessionManager.js');
 
 const PORT = 3000;
-const activeGames = new Map();
 
 let client;
 
@@ -88,9 +88,9 @@ function hasAdminPermission(member) {
   return member.roles?.cache?.some((role) => config.adminRoles.includes(role.id)) || false;
 }
 
-function releaseGameLock(channelId, game) {
-  activeGames.delete(channelId);
-  console.log(`[Game Lock] Released for group game: ${game.name}`);
+async function releaseGameLock(channelId, game) {
+  await sessionManager.end(channelId);
+  console.log(`[Game Session] Released for group game: ${game.name}`);
 }
 
 async function handleCommand(message, command, args) {
@@ -115,18 +115,16 @@ async function handleGame(message, game, args) {
     return message.channel.send(`❌ | لعبة ${game.name} معطلة في هذه القناة.`);
   }
 
-  if (activeGames.has(channelId)) {
+  if (sessionManager.has(channelId)) {
     return message.channel.send('⚠️ | هناك لعبة نشطة بالفعل في هذه القناة. انتظر حتى تنتهي.');
   }
-
-  activeGames.set(channelId, game.name);
 
   const callback = () => releaseGameLock(channelId, game);
 
   try {
-    await game.execute(message, args, callback);
+    await sessionManager.run(channelId, game.name, () => game.execute(message, args, callback), { ownerId: message.author?.id, type: game.type || 'group' });
   } catch (error) {
-    activeGames.delete(channelId);
+    await sessionManager.stop(channelId, 'game-error');
     console.error(`Error executing game ${game.name}:`, error);
     try {
       await message.channel.send('حدث خطأ أثناء تشغيل اللعبة.');
@@ -172,21 +170,48 @@ async function bootstrap() {
 
   module.exports.client = client;
 
+  sessionManager.patchRuntime();
+
   client.commands = new Collection();
   client.games = new Collection();
+  client.slashCommands = new Collection();
   client.hasAdminPermission = hasAdminPermission;
+  client.findGame = (name) => findByNameOrAlias(client.games, name);
+  client.findCommand = (name) => findByNameOrAlias(client.commands, name);
+  client.runGame = handleGame;
 
   loadModulesFromDirectory('commands', client.commands, 'Command');
   loadModulesFromDirectory('games', client.games, 'Game');
+  loadModulesFromDirectory('slashCommands', client.slashCommands, 'Slash Command');
 
-  client.on('clientReady', () => {
+  client.on('clientReady', async () => {
     console.log(`${client.user.username} is Online`);
     try {
       client.user.setActivity('Error', { type: ActivityType.Playing });
-    } catch (_) {}
+      const slashData = [...client.slashCommands.values()].filter((command) => command.data).map((command) => command.data.toJSON());
+      await client.application.commands.set(slashData);
+      console.log(`[Slash Loader] Registered ${slashData.length} slash commands.`);
+    } catch (error) { console.error('[Slash Loader] Failed:', error); }
   });
 
   client.on('messageCreate', handleMessageCreate);
+  client.on('interactionCreate', async (interaction) => {
+    try {
+      if (interaction.isAutocomplete()) {
+        const command = client.slashCommands.get(interaction.commandName);
+        if (command?.autocomplete) return command.autocomplete(interaction);
+      }
+      if (!interaction.isChatInputCommand()) return;
+      const command = client.slashCommands.get(interaction.commandName);
+      if (!command) return;
+      await command.execute(interaction);
+    } catch (error) {
+      console.error(`Error executing slash command ${interaction.commandName}:`, error);
+      const payload = { content: 'حدث خطأ أثناء تنفيذ أمر السلاش.', ephemeral: true };
+      if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => {});
+      else await interaction.reply(payload).catch(() => {});
+    }
+  });
 
   await client.login(process.env.TOKEN).catch((error) => {
     console.error('Discord login failed:', error);

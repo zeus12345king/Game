@@ -4,6 +4,7 @@ const path = require('path');
 const db   = require('../database.js');
 const config = require('../config.js');
 const inv  = require('../inventory.js');
+const shopManager = require('../core/shopManager.js');
 
 GlobalFonts.registerFromPath(path.join(__dirname, '../img/Fonts/IBMBold.ttf'), 'IBM');
 
@@ -205,23 +206,15 @@ module.exports = {
       const item   = ITEMS.find(x => x.id === itemId);
       if (!item) { await i.reply({ content: 'قدرة غير موجودة.', ephemeral: true }); return; }
 
-      const cost       = costs[item.costKey];
-      const userPoints = await db.getUserPoints(userId);
-
-      if (userPoints < cost) {
-        await i.reply({
-          content: `نقاطك غير كافية، تحتاج **${cost}** نقطة.`,
-          ephemeral: true,
-        });
+      const result = await shopManager.buy({ userId, gameName: 'roulette', itemId, items: ITEMS });
+      if (!result.success) {
+        await i.reply({ content: result.error, ephemeral: true });
         return;
       }
-
-      await db.removePoints(userId, cost);
-      await inv.addItem(userId, itemId);
       cooldowns.set(userId, now);
 
-      const newPoints = await db.getUserPoints(userId);
-      const owned     = (await inv.getItems(userId))[itemId] || 0;
+      const newPoints = result.remaining;
+      const owned     = result.owned;
 
       await i.reply({
         content: `تم شراء **${item.name}** بنجاح\nرصيدك المتبقي: **${newPoints}** نقطة  |  عندك الان: **${owned}**`,

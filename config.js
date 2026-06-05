@@ -65,6 +65,24 @@ shopImages: {
     closed:    0xFFFFFF,
   },
 
+
+
+  // الإيموجيات المركزية المشتركة لجميع الألعاب والأوامر
+  emojis: {
+    join: '✅',
+    leave: '🚪',
+    player: '👤',
+    timer: '⏳',
+    winner: '🏆',
+    points: '⭐',
+    games: '🎮',
+    shop: '🛒',
+    stop: '🛑',
+    stats: '📊',
+    vote: '🗳️',
+    mode: '⚙️',
+  },
+
   // نقاط وأوقات 
 
   winPoints: {

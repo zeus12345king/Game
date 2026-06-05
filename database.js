@@ -1,4 +1,6 @@
 const Points = require('./models/Points.js');
+const statsManager = require('./core/statsManager.js');
+const sessionManager = require('./core/sessionManager.js');
 
 // MongoDB-backed replacement for the previous points.json file storage.
 
@@ -38,11 +40,17 @@ const getUserPoints = async (userId) => {
 };
 
 const addPoints = async (userId, points = 1) => {
+  const amount = normalizePointValue(points);
   await Points.updateOne(
     { userId },
-    { $inc: { points: normalizePointValue(points) }, $setOnInsert: { userId } },
+    { $inc: { points: amount }, $setOnInsert: { userId } },
     { upsert: true }
   );
+  const session = sessionManager.current();
+  if (amount > 0) {
+    sessionManager.registerWinner(userId);
+    await statsManager.recordPoints(userId, amount, session?.gameName);
+  }
   return true;
 };
 
