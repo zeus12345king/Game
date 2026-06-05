@@ -33,6 +33,11 @@ module.exports = {
     outsider:  'img/out.png', // برا السالفة
   },
 
+  // صور المتجر لكل لعبة (اختياري)
+  shopImages: {
+    roulette: 'img/roulette_shop.jpeg',
+  },
+
    // الاوان تبع الشريط الجانبي للأمبيد v2
   colors: {
     roulette:  0xFFFFFF,
