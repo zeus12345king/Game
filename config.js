@@ -97,7 +97,7 @@ shopImages: {
     chairs:    10,
     mahbas:    10,
     reverse:   10,
-    outsider:  10,
+    outsider:  20,
   },
 
   lobbyTime: {
