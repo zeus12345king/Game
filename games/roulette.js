@@ -119,6 +119,32 @@ function hslToHex(h, s, l) {
   return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
+// دالة مساعدة لبناء أزرار المتجر بشكل ديناميكي
+function buildShopRows(shopItems, chooserScore, eliminatedPlayersCount, abilityEmojis) {
+  const shopRows = [];
+  for (let s = 0; s < shopItems.length; s += 3) {
+    const row = new ActionRowBuilder();
+    shopItems.slice(s, s + 3).forEach(item => {
+      const canAfford = chooserScore >= item.cost;
+      const hasElim = !item.requireEliminated || eliminatedPlayersCount > 0;
+      const disabled = item.used || !canAfford || !hasElim;
+      const labelText = item.used
+        ? `${item.label} (مستخدم)`
+        : item.label;
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(item.id)
+          .setEmoji(abilityEmojis[item.invKey] || "❓")
+          .setLabel(labelText.substring(0, 80))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(disabled)
+      );
+    });
+    shopRows.push(row);
+  }
+  return shopRows;
+}
+
 async function startGame(context, nowTime, callback) {
   const players = [];
   const endTime = nowTime + TIME_TO_START / 1000;
@@ -183,6 +209,15 @@ async function startGame(context, nowTime, callback) {
     time: TIME_TO_START,
   });
 
+  const abilityEmojis = {
+    nuclear: '<:z7:1512214884421734400>',
+    reverse: '<:z8:1512222893772242953>',
+    protect: '<:z9:1512222953826160740>',
+    freeze: '<:z10:1512223654014881852>',
+    twice: '<:z11:1512224011357126948>',
+    revive: '<:z12:1512224063819485334>',
+  };
+
   collector.on("collect", async (i) => {
     try {
       if (i.customId === "join") {
@@ -217,56 +252,55 @@ async function startGame(context, nowTime, callback) {
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
         await updateLobbyView();
       } else if (i.customId === "open_shop_lobby") {
-        let chooserScore = await db.getUserPoints(i.user.id) || 0;
+        // =====================================================================
+        // المتجر في اللوبي - مُصلح: يسمح بشراء أكثر من عنصر بدون إعادة فتح
+        // =====================================================================
         const costs = config.abilityCosts.roulette;
-        const playerInv = await inv.getItems(i.user.id);
 
-        const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
-
-        const abilityEmojis = {
-          nuclear: '<:z7:1512214884421734400>',
-          reverse: '<:z8:1512222893772242953>',
-          protect: '<:z9:1512222953826160740>',
-          freeze: '<:z10:1512223654014881852>',
-          twice: '<:z11:1512224011357126948>',
-          revive: '<:z12:1512224063819485334>',
+        const getShopItems = async () => {
+          const currentScore = await db.getUserPoints(i.user.id) || 0;
+          return {
+            score: currentScore,
+            items: [
+              { id: "shop_buy_nuclear", label: "نووي - يطرد الجميع",  cost: costs.nuclear, invKey: "nuclear" },
+              { id: "shop_buy_reverse", label: "طرد عكسي",            cost: costs.reverse,  invKey: "reverse" },
+              { id: "shop_buy_protect", label: "حماية لاعب",           cost: costs.protect,  invKey: "protect" },
+              { id: "shop_buy_freeze",  label: "تجميد لاعب",           cost: costs.freeze,   invKey: "freeze" },
+              { id: "shop_buy_twice",   label: "طرد مرتين",            cost: costs.twice,    invKey: "twice" },
+              { id: "shop_buy_revive",  label: "إحياء لاعب",           cost: costs.revive,   invKey: "revive" },
+            ]
+          };
         };
 
-        // shop items (passive reverse/protect are now self‑buffs, always purchasable)
-        const shopItems = [
-          { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear" },
-          { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse" },
-          { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect" },
-          { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze" },
-          { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice" },
-          { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", requireEliminated: true },
-        ];
-
-        const buildShopRows = (score) => {
-          const rows = [];
-          for (let s = 0; s < shopItems.length; s += 3) {
+        const buildLobbyShopMessage = async () => {
+          const { score, items } = await getShopItems();
+          const playerInv = await inv.getItems(i.user.id);
+          const shopRows = [];
+          for (let s = 0; s < items.length; s += 3) {
             const row = new ActionRowBuilder();
-            shopItems.slice(s, s + 3).forEach(item => {
+            items.slice(s, s + 3).forEach(item => {
               const canAfford = score >= item.cost;
-              const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
-              const disabled = !canAfford || !hasElim;
+              const owned = playerInv[item.invKey] || 0;
               row.addComponents(
                 new ButtonBuilder()
                   .setCustomId(item.id)
                   .setEmoji(abilityEmojis[item.invKey] || "❓")
-                  .setLabel(item.label.substring(0, 80))
+                  .setLabel(`${item.label} (${item.cost}ن) [لديك: ${owned}]`.substring(0, 80))
                   .setStyle(ButtonStyle.Secondary)
-                  .setDisabled(disabled)
+                  .setDisabled(!canAfford)
               );
             });
-            rows.push(row);
+            shopRows.push(row);
           }
-          return rows;
+          return { score, shopRows };
         };
 
+        const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
+        const { score: initialScore, shopRows: initialRows } = await buildLobbyShopMessage();
+
         const replyPayload = {
-          content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
-          components: buildShopRows(chooserScore),
+          content: `<:z13:1512229604147068948> | رصيدك: **${initialScore}**`,
+          components: initialRows,
           ephemeral: true,
           fetchReply: true,
         };
@@ -274,33 +308,58 @@ async function startGame(context, nowTime, callback) {
 
         const replyMessage = await i.reply(replyPayload);
 
+        // collector بدون stop بعد كل عملية شراء - يبقى مفتوحاً 60 ثانية
         const shopCollector = replyMessage.createMessageComponentCollector({
-          filter: (shopI) => shopI.user.id === i.user.id,
-          time: 30000,
+          filter: (shopI) => shopI.user.id === i.user.id && shopI.customId.startsWith("shop_buy_"),
+          time: 60000,
         });
 
         shopCollector.on("collect", async (shopI) => {
-          const chosenItem = shopItems.find(item => item.id === shopI.customId);
-          if (!chosenItem) return;
+          try {
+            const invKey = shopI.customId.replace("shop_buy_", "");
+            const costs2 = config.abilityCosts.roulette;
+            const costMap = {
+              nuclear: costs2.nuclear,
+              reverse: costs2.reverse,
+              protect: costs2.protect,
+              freeze: costs2.freeze,
+              twice: costs2.twice,
+              revive: costs2.revive,
+            };
+            const labelMap = {
+              nuclear: "نووي - يطرد الجميع",
+              reverse: "طرد عكسي",
+              protect: "حماية لاعب",
+              freeze: "تجميد لاعب",
+              twice: "طرد مرتين",
+              revive: "إحياء لاعب",
+            };
 
-          const currentPoints = await db.getUserPoints(i.user.id) || 0;
-          if (currentPoints < chosenItem.cost) {
-            await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
-            return;
+            const itemCost = costMap[invKey];
+            if (itemCost === undefined) {
+              await shopI.reply({ content: "عنصر غير معروف.", ephemeral: true });
+              return;
+            }
+
+            const currentPoints = await db.getUserPoints(i.user.id) || 0;
+            if (currentPoints < itemCost) {
+              await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
+              return;
+            }
+
+            await db.removePoints(i.user.id, itemCost);
+            await inv.addItem(i.user.id, invKey, 1);
+
+            // تحديث الأزرار بعد الشراء
+            const { score: newScore, shopRows: newRows } = await buildLobbyShopMessage();
+            await shopI.update({
+              content: `<:z13:1512229604147068948> | رصيدك: **${newScore}** | ✅ اشتريت **${labelMap[invKey]}** بنجاح!`,
+              components: newRows,
+            });
+          } catch (err) {
+            console.error("Error in lobby shop collector:", err);
+            try { await shopI.reply({ content: "حدث خطأ أثناء الشراء.", ephemeral: true }); } catch (e) {}
           }
-
-          await db.removePoints(i.user.id, chosenItem.cost);
-          await inv.addItem(i.user.id, chosenItem.invKey, 1);
-          chooserScore = currentPoints - chosenItem.cost; // update local score
-
-          await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
-
-          // Update the shop message with new score and button states
-          await replyMessage.edit({
-            content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
-            components: buildShopRows(chooserScore),
-          });
-          // collector stays alive, user can buy more
         });
 
         shopCollector.on("end", () => {
@@ -537,7 +596,7 @@ async function prepareRound(
         chooserObj && chooserObj.frozenUntilRound >= ROUND_COUNTER;
       if (isFrozen) {
         await context.channel.send(
-          `|<@${randomPlayerId}> مجمد ولا يستطيع التصرف وتمت إزالته.`
+          `❄️ | <@${randomPlayerId}> مجمد ولا يستطيع التصرف وتمت إزالته.`
         );
         await lose(randomPlayerId, context);
         eliminatedPlayers.push(chooserObj);
@@ -553,8 +612,11 @@ async function prepareRound(
         return;
       }
 
-      let chooserScore = await db.getUserPoints(randomPlayerId) || 0;
+      const chooserScore = await db.getUserPoints(randomPlayerId) || 0;
       const costs = config.abilityCosts.roulette;
+      // =====================================================================
+      // جلب الـ inventory في كل جولة لضمان تحديث ما اشتراه اللاعب من اللوبي
+      // =====================================================================
       const playerInv = await inv.getItems(randomPlayerId);
 
       const filteredPlayers = players.filter((p) => p.id !== randomPlayerId);
@@ -573,10 +635,11 @@ async function prepareRound(
         targetRows.push(new ActionRowBuilder().addComponents(...comps));
       }
 
-      // Active abilities (nuclear, freeze, twice, revive) – remove reverse/protect from active list
       const abilityButtons = [];
       const abilityDefs = [
         { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
+        { invKey: 'reverse', cid: 'ability_reverse',   emoji: '<:z8:1512222893772242953>', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('reverse') },
+        { invKey: 'protect', cid: 'ability_protect',   emoji: '<:z9:1512222953826160740>', label: 'حماية',      style: ButtonStyle.Success,   used: chooserUsedAbilities.has('protect') },
         { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('freeze') },
         { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('twice') },
         { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: chooserUsedAbilities.has('revive'), requireElim: true },
@@ -659,6 +722,10 @@ async function prepareRound(
         collectors.push(createCollector(eliminationMessageB));
       }
 
+      // =====================================================================
+      // kicktwice مُصلح: count=2 يعني لم يتم طرد أحد بعد
+      // عند الطرد الأول count يصبح 1، عند الطرد الثاني count يصبح 0
+      // =====================================================================
       let kicktwice = { status: false, count: 0, firstTargetId: null };
       let playerHasWithdraw = false;
       let hasBeenReset = false;
@@ -671,140 +738,162 @@ async function prepareRound(
           } catch (e) { }
         });
 
-      // Modified standard elimination that checks passive reverse/protect
+      // =====================================================================
+      // handleStandardElimination مُصلح
+      // =====================================================================
       const handleStandardElimination = async (
         chooserId,
         targetId,
         interaction
       ) => {
         const targetObj = players.find((p) => p.id === targetId);
+
         if (!targetObj) return;
 
-        // Check passive reverse (self armor)
-        if (!targetObj.isBot) {
-          const targetInv = await inv.getItems(targetId);
-          if (targetInv.reverse > 0) {
-            // Reflect elimination back to chooser
-            await inv.useItem(targetId, 'reverse');
-            await context.channel.send(`🔄 | <@${targetId}> لديه درع عاكس! تم طرد <@${chooserId}> بدلاً منه.`);
-            // Eliminate the chooser
-            await lose(chooserId, context);
-            const chooserObj = players.find(p => p.id === chooserId);
-            if (chooserObj) {
-              eliminatedPlayers.push(chooserObj);
-              const idx = players.findIndex(p => p.id === chooserId);
-              if (idx !== -1) players.splice(idx, 1);
-            }
-            stopAll("done");
-            await prepareRound(context, players, eliminatedPlayers, client, callback);
-            return;
-          }
-        }
-
-        // Check passive protect (extra life)
-        if (!targetObj.isBot) {
-          const targetInv = await inv.getItems(targetId);
-          if (targetInv.protect > 0) {
-            await inv.useItem(targetId, 'protect');
-            await context.channel.send(`🛡️ | <@${targetId}> محمي بحياة إضافية! لم يتم طرده.`);
-            stopAll("done");
-            await prepareRound(context, players, eliminatedPlayers, client, callback);
-            return;
-          }
-        }
-
-        // Existing active buffs (kept for compatibility)
+        // التحقق من الحماية
         if (targetObj.protectedUntilRound >= ROUND_COUNTER) {
           targetObj.protectedUntilRound = 0;
+          await interaction.reply({ content: `🛡️ | اللاعب <@${targetId}> محمي! لم يتم طرده.`, ephemeral: true });
           await context.channel.send(`🛡️ | اللاعب <@${targetId}> محمي! لم يتم طرده.`);
           stopAll("done");
-          await prepareRound(context, players, eliminatedPlayers, client, callback);
+          await prepareRound(
+            context,
+            players,
+            eliminatedPlayers,
+            client,
+            callback
+          );
           return;
         }
 
+        // التحقق من الطرد العكسي على الهدف
         if (targetObj.reverseUntilRound >= ROUND_COUNTER) {
           targetObj.reverseUntilRound = 0;
+          await interaction.reply({ content: `🔁 | رد الطرد! <@${chooserId}> تم طردك بدلًا من <@${targetId}>!`, ephemeral: true });
           await context.channel.send(`🔁 | رد الطرد! <@${chooserId}> تم طردك بدلًا من <@${targetId}>!`);
           await lose(chooserId, context);
-          const chooserObj = players.find(p => p.id === chooserId);
-          if (chooserObj) {
-            eliminatedPlayers.push(chooserObj);
-            const idx = players.findIndex(p => p.id === chooserId);
-            if (idx !== -1) players.splice(idx, 1);
-          }
+          eliminatedPlayers.push(chooserObj);
+          const idx = players.findIndex((p) => p.id === chooserId);
+          if (idx !== -1) players.splice(idx, 1);
           stopAll("done");
-          await prepareRound(context, players, eliminatedPlayers, client, callback);
+          await prepareRound(
+            context,
+            players,
+            eliminatedPlayers,
+            client,
+            callback
+          );
           return;
         }
 
-        // Twice handling
-        if (kicktwice.status && kicktwice.count > 1) {
+        // التحقق من الطرد العكسي على الطارد نفسه (اشترى reverse من اللوبي وطبقه على نفسه)
+        if (chooserObj && chooserObj.reverseUntilRound >= ROUND_COUNTER) {
+          chooserObj.reverseUntilRound = 0;
+          await interaction.reply({ content: `🔁 | أنت تحت تأثير طرد عكسي! تم طردك بدلًا من <@${targetId}>!`, ephemeral: true });
+          await context.channel.send(`🔁 | <@${chooserId}> كان تحت تأثير طرد عكسي وتم طرده!`);
+          await lose(chooserId, context);
+          eliminatedPlayers.push(chooserObj);
+          const idx = players.findIndex((p) => p.id === chooserId);
+          if (idx !== -1) players.splice(idx, 1);
+          stopAll("done");
+          await prepareRound(
+            context,
+            players,
+            eliminatedPlayers,
+            client,
+            callback
+          );
+          return;
+        }
+
+        // حالة kicktwice: الطرد الأول (count لا يزال 2)
+        if (kicktwice.status && kicktwice.count === 2) {
+          kicktwice.firstTargetId = targetId;
+          kicktwice.count = 1;
+
+          await lose(targetId, context);
+          eliminatedPlayers.push(targetObj);
+          const idx = players.findIndex((p) => p.id === targetId);
+          if (idx !== -1) players.splice(idx, 1);
+
           await interaction.reply({
             content: `💣 | تم طرد <@${targetId}>. اختر اللاعب الثاني.`,
             ephemeral: true,
           });
 
-          const newRows = [];
-          if (eliminationMessageA)
-            newRows.push(...eliminationMessageA.components);
-          if (eliminationMessageB)
-            newRows.push(...eliminationMessageB.components);
+          // تحديث الأزرار لتعطيل اللاعب المطرود
+          try {
+            const disableTargetInRows = (rows) =>
+              rows.map((row) => {
+                const components = row.components.map((button) => {
+                  if (button.data && button.data.custom_id === `eliminate_${targetId}`) {
+                    return ButtonBuilder.from(button).setDisabled(true);
+                  }
+                  return ButtonBuilder.from(button);
+                });
+                return new ActionRowBuilder().addComponents(...components);
+              });
 
-          const updatedRows = newRows.map((row) => {
-            const components = row.components.map((button) => {
-              if (button.customId === `eliminate_${targetId}`) {
-                return ButtonBuilder.from(button)
-                  .setDisabled(true)
-                  .setLabel(`${button.label} (تم الطرد)`);
-              }
-              return button;
-            });
-            return new ActionRowBuilder().addComponents(...components);
-          });
-
-          if (eliminationMessageA)
             await eliminationMessageA.edit({
-              components: updatedRows.slice(0, firstHalf.length),
-            });
-          if (eliminationMessageB)
-            await eliminationMessageB.edit({
-              components: updatedRows.slice(firstHalf.length),
-            });
-
-          kicktwice.firstTargetId = targetId;
-        } else {
-          if (kicktwice.status && kicktwice.firstTargetId) {
-            await context.channel.send(`💣 | تم طرد <@${kicktwice.firstTargetId}> و <@${targetId}>.`);
-          } else {
-            await context.channel.send(`💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`);
+              components: disableTargetInRows(eliminationMessageA.components).slice(0, 5),
+            }).catch(() => {});
+            if (eliminationMessageB) {
+              await eliminationMessageB.edit({
+                components: disableTargetInRows(eliminationMessageB.components),
+              }).catch(() => {});
+            }
+          } catch (e) {
+            console.error("Error updating kicktwice buttons:", e);
           }
+
+          voteTaken = false;
+          return;
         }
+
+        // حالة kicktwice: الطرد الثاني (count أصبح 1)
+        if (kicktwice.status && kicktwice.count === 1) {
+          kicktwice.count = 0;
+          await lose(targetId, context);
+          eliminatedPlayers.push(targetObj);
+          const idx = players.findIndex((p) => p.id === targetId);
+          if (idx !== -1) players.splice(idx, 1);
+
+          await context.channel.send(`💣 | تم طرد <@${kicktwice.firstTargetId}> و <@${targetId}>.`);
+          kicktwice.status = false;
+          kicktwice.firstTargetId = null;
+
+          voteTaken = true;
+          stopAll("done");
+          await prepareRound(
+            context,
+            players,
+            eliminatedPlayers,
+            client,
+            callback
+          );
+          return;
+        }
+
+        // طرد عادي
+        await interaction.reply({ content: `💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`, ephemeral: true });
+        await context.channel.send(`💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`);
 
         await lose(targetId, context);
         eliminatedPlayers.push(targetObj);
         const idx = players.findIndex((p) => p.id === targetId);
         if (idx !== -1) players.splice(idx, 1);
 
-        if (kicktwice.status) {
-          kicktwice.count--;
-          if (kicktwice.count > 0) {
-            voteTaken = false;
-            return;
-          } else {
-            kicktwice.status = false;
-            kicktwice.firstTargetId = null;
-            stopAll("done");
-            await prepareRound(context, players, eliminatedPlayers, client, callback);
-            return;
-          }
-        } else {
-          stopAll("done");
-          await prepareRound(context, players, eliminatedPlayers, client, callback);
-          return;
-        }
+        voteTaken = true;
+        stopAll("done");
+        await prepareRound(
+          context,
+          players,
+          eliminatedPlayers,
+          client,
+          callback
+        );
       };
 
-      // Fix: collectors on correct messages
       collectors.forEach((col) => {
         col.on("collect", async (ii) => {
           try {
@@ -816,20 +905,19 @@ async function prepareRound(
               return;
             }
 
-            const isReversed =
-              chooserObj && chooserObj.reverseUntilRound >= ROUND_COUNTER;
-
+            // التحقق من الطرد العكسي على الطارد قبل أي محاولة طرد
             const isEliminationAttempt =
               (ii.customId.startsWith("eliminate_") &&
-                !ii.customId.startsWith("eliminate_withdraw") &&
-                !ii.customId.startsWith("eliminate_revive")) ||
+                ii.customId !== "eliminate_withdraw" &&
+                ii.customId !== "eliminate_revive") ||
               ii.customId === "eliminate_random" ||
               ii.customId === "eliminate_nuclear" ||
               ii.customId === "eliminate_twice";
 
-            if (isReversed && isEliminationAttempt) {
+            if (chooserObj && chooserObj.reverseUntilRound >= ROUND_COUNTER && isEliminationAttempt) {
               chooserObj.reverseUntilRound = 0;
-              await context.channel.send(`🔁 | لقد حاولت طرد لاعب وأنت تحت تأثير "طرد عكسي"! تم طردك.`);
+              await ii.reply({ content: `🔁 | لقد حاولت طرد لاعب وأنت تحت تأثير "طرد عكسي"! تم طردك.`, ephemeral: true });
+              await context.channel.send(`🔁 | <@${randomPlayerId}> حاول الطرد وكان تحت تأثير طرد عكسي! تم طرده.`);
 
               await lose(randomPlayerId, context);
               eliminatedPlayers.push(chooserObj);
@@ -838,7 +926,13 @@ async function prepareRound(
 
               voteTaken = true;
               stopAll("done");
-              await prepareRound(context, players, eliminatedPlayers, client, callback);
+              await prepareRound(
+                context,
+                players,
+                eliminatedPlayers,
+                client,
+                callback
+              );
               return;
             }
 
@@ -846,7 +940,7 @@ async function prepareRound(
             const cid = ii.customId;
 
             if (cid === "open_shop") {
-              const abilityEmojis = {
+              const abilityEmojisInGame = {
                 nuclear: '<:z7:1512214884421734400>',
                 reverse: '<:z8:1512222893772242953>',
                 protect: '<:z9:1512222953826160740>',
@@ -856,8 +950,8 @@ async function prepareRound(
               };
               const shopItems = [
                 { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear", used: chooserUsedAbilities.has("nuclear") },
-                { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse" },
-                { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect" },
+                { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse", used: chooserUsedAbilities.has("reverse") },
+                { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect", used: chooserUsedAbilities.has("protect") },
                 { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze", used: chooserUsedAbilities.has("freeze") },
                 { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice", used: chooserUsedAbilities.has("twice") },
                 { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: chooserUsedAbilities.has("revive"), requireEliminated: true },
@@ -865,77 +959,36 @@ async function prepareRound(
 
               const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
-              const buildShopRows = (score) => {
-                const rows = [];
-                for (let s = 0; s < shopItems.length; s += 3) {
-                  const row = new ActionRowBuilder();
-                  shopItems.slice(s, s + 3).forEach(item => {
-                    const canAfford = score >= item.cost;
-                    const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
-                    const disabled = item.used || !canAfford || !hasElim;
-                    const labelText = item.used ? `${item.label} (مستخدم)` : item.label;
-                    row.addComponents(
-                      new ButtonBuilder()
-                        .setCustomId(item.id)
-                        .setEmoji(abilityEmojis[item.invKey] || "❓")
-                        .setLabel(labelText.substring(0, 80))
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(disabled)
-                    );
-                  });
-                  rows.push(row);
-                }
-                return rows;
-              };
+              const shopRows = [];
+              for (let s = 0; s < shopItems.length; s += 3) {
+                const row = new ActionRowBuilder();
+                shopItems.slice(s, s + 3).forEach(item => {
+                  const canAfford = chooserScore >= item.cost;
+                  const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
+                  const disabled = item.used || !canAfford || !hasElim;
+                  const labelText = item.used
+                    ? `${item.label} (مستخدم)`
+                    : item.label;
+                  row.addComponents(
+                    new ButtonBuilder()
+                      .setCustomId(item.id)
+                      .setEmoji(abilityEmojisInGame[item.invKey] || "❓")
+                      .setLabel(labelText.substring(0, 80))
+                      .setStyle(ButtonStyle.Secondary)
+                      .setDisabled(disabled)
+                  );
+                });
+                shopRows.push(row);
+              }
 
               const replyPayload = {
-                content: `🛒 | رصيدك: **${chooserScore}**`,
-                components: buildShopRows(chooserScore),
+                content: `🛒 | رصيدك: **${chooserScore}ن**`,
+                components: shopRows,
                 ephemeral: true,
-                fetchReply: true,
               };
               if (shopImageFile) replyPayload.files = [shopImageFile];
 
-              const replyMsg = await ii.reply(replyPayload);
-
-              const shopCollector = replyMsg.createMessageComponentCollector({
-                filter: (shopI) => shopI.user.id === randomPlayerId,
-                time: 30000,
-              });
-
-              shopCollector.on("collect", async (shopI) => {
-                const chosenItem = shopItems.find(item => item.id === shopI.customId);
-                if (!chosenItem) return;
-                if (chosenItem.used) {
-                  await shopI.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
-                  return;
-                }
-                const currentPoints = await db.getUserPoints(randomPlayerId) || 0;
-                if (currentPoints < chosenItem.cost) {
-                  await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
-                  return;
-                }
-                await db.removePoints(randomPlayerId, chosenItem.cost);
-                await inv.addItem(randomPlayerId, chosenItem.invKey, 1);
-                chooserScore = currentPoints - chosenItem.cost;
-
-                if (chosenItem.invKey === 'nuclear') chooserUsedAbilities.add('nuclear');
-                else if (chosenItem.invKey === 'freeze') chooserUsedAbilities.add('freeze');
-                else if (chosenItem.invKey === 'twice') chooserUsedAbilities.add('twice');
-                else if (chosenItem.invKey === 'revive') chooserUsedAbilities.add('revive');
-
-                await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
-
-                await replyMsg.edit({
-                  content: `🛒 | رصيدك: **${chooserScore}**`,
-                  components: buildShopRows(chooserScore),
-                });
-              });
-
-              shopCollector.on("end", () => {
-                replyMsg.edit({ components: [] }).catch(() => {});
-              });
-
+              await ii.reply(replyPayload);
               voteTaken = false;
               return;
             }
@@ -948,111 +1001,80 @@ async function prepareRound(
                 ephemeral: true,
               });
               playerHasWithdraw = true;
+              voteTaken = true;
               await lose(randomPlayerId, context);
+              await context.channel.send(`<:z6:1512127272184975360> | <@${randomPlayerId}> انسحب من اللعبة.`);
               stopAll("done");
-              await prepareRound(context, players, eliminatedPlayers, client, callback);
+              await prepareRound(
+                context,
+                players,
+                eliminatedPlayers,
+                client,
+                callback
+              );
               return;
             } else if (cid === "eliminate_random") {
-              let randomTarget = filteredPlayers[Math.floor(Math.random() * filteredPlayers.length)];
-
-              // Check passive items for random target
-              if (!randomTarget.isBot) {
-                const tInv = await inv.getItems(randomTarget.id);
-                if (tInv.reverse > 0) {
-                  await inv.useItem(randomTarget.id, 'reverse');
-                  await context.channel.send(`🔄 | <@${randomTarget.id}> لديه درع عاكس! تم طرد <@${randomPlayerId}> بدلاً منه.`);
-                  await lose(randomPlayerId, context);
-                  eliminatedPlayers.push(chooserObj);
-                  players.splice(players.findIndex(p => p.id === randomPlayerId), 1);
-                  stopAll("done");
-                  await prepareRound(context, players, eliminatedPlayers, client, callback);
-                  return;
-                }
-                if (tInv.protect > 0) {
-                  await inv.useItem(randomTarget.id, 'protect');
-                  await context.channel.send(`🛡️ | <@${randomTarget.id}> محمي! لم يتم طرده.`);
-                  stopAll("done");
-                  await prepareRound(context, players, eliminatedPlayers, client, callback);
-                  return;
-                }
+              const currentFilteredPlayers = players.filter((p) => p.id !== randomPlayerId);
+              if (currentFilteredPlayers.length === 0) {
+                await ii.reply({ content: "لا يوجد لاعبين آخرين!", ephemeral: true });
+                voteTaken = false;
+                return;
               }
+              let randomTarget = currentFilteredPlayers[Math.floor(Math.random() * currentFilteredPlayers.length)];
 
               if (randomTarget.protectedUntilRound >= ROUND_COUNTER) {
                 randomTarget.protectedUntilRound = 0;
+                await ii.reply({ content: `🛡️ | اللاعب <@${randomTarget.id}> محمي! لم يتم طرده.`, ephemeral: true });
                 await context.channel.send(`🛡️ | اللاعب <@${randomTarget.id}> محمي! لم يتم طرده.`);
                 stopAll("done");
                 await prepareRound(context, players, eliminatedPlayers, client, callback);
                 return;
               }
 
-              await context.channel.send(
-                `💣 | <@${randomPlayerId}> قام بطرد عشوائيا اللاعب: <@${randomTarget.id}>`
-              );
+              await ii.reply({ content: `💣 | <@${randomPlayerId}> قام بطرد عشوائياً اللاعب: <@${randomTarget.id}>`, ephemeral: true });
+              await context.channel.send(`💣 | <@${randomPlayerId}> قام بطرد عشوائيا اللاعب: <@${randomTarget.id}>`);
               await lose(randomTarget.id, context);
               eliminatedPlayers.push(randomTarget);
               players.splice(
                 players.findIndex((p) => p.id === randomTarget.id),
                 1
               );
+              voteTaken = true;
               stopAll("done");
-              await prepareRound(context, players, eliminatedPlayers, client, callback);
+              await prepareRound(
+                context,
+                players,
+                eliminatedPlayers,
+                client,
+                callback
+              );
               return;
             } else if (cid === "eliminate_nuclear") {
               await inv.useItem(randomPlayerId, 'nuclear');
               chooserObj.usedAbilities.add("nuclear");
               const others = players.filter((p) => p.id !== randomPlayerId);
-              let reflected = false;
-
               for (const op of others) {
-                if (op.isBot) continue;
-                const tInv = await inv.getItems(op.id);
-                if (tInv.reverse > 0) {
-                  await inv.useItem(op.id, 'reverse');
-                  reflected = true;
-                  await context.channel.send(`🔄 | <@${op.id}> لديه درع عاكس! تم طرد <@${randomPlayerId}> بدلاً منه.`);
-                  // Eliminate chooser, stop nuclear
-                  await lose(randomPlayerId, context);
-                  eliminatedPlayers.push(chooserObj);
-                  const idx = players.findIndex(p => p.id === randomPlayerId);
-                  if (idx !== -1) players.splice(idx, 1);
-                  for (const other of others) {
-                    if (other.id === op.id) continue; // already protected?
-                    // no additional elimination because nuclear is reflected entirely
-                  }
-                  stopAll("done");
-                  await prepareRound(context, players, eliminatedPlayers, client, callback);
-                  return;
-                }
+                await lose(op.id, context);
+                eliminatedPlayers.push(op);
               }
-
-              // No reflect, process protect and elimination
-              for (const op of others) {
-                if (op.isBot) {
-                  await lose(op.id, context);
-                  eliminatedPlayers.push(op);
-                } else {
-                  const tInv = await inv.getItems(op.id);
-                  if (tInv.protect > 0) {
-                    await inv.useItem(op.id, 'protect');
-                    await context.channel.send(`🛡️ | <@${op.id}> محمي بحياة إضافية! نجا من النووي.`);
-                  } else {
-                    await lose(op.id, context);
-                    eliminatedPlayers.push(op);
-                  }
-                }
-              }
-
               for (let k = players.length - 1; k >= 0; k--) {
                 if (players[k].id !== randomPlayerId) players.splice(k, 1);
               }
-
+              await ii.reply({ content: `☢️ | استخدمت النووي!`, ephemeral: true });
               await context.channel.send(
                 `☢️ | <@${randomPlayerId}> استخدم النووي وطرد: ${others
                   .map((p) => `<@${p.id}>`)
                   .join(", ")}`
               );
+              voteTaken = true;
               stopAll("done");
-              await prepareRound(context, players, eliminatedPlayers, client, callback);
+              await prepareRound(
+                context,
+                players,
+                eliminatedPlayers,
+                client,
+                callback
+              );
               return;
             } else if (cid === "eliminate_twice") {
               await ii.reply({
@@ -1061,12 +1083,20 @@ async function prepareRound(
               });
               await inv.useItem(randomPlayerId, 'twice');
               chooserObj.usedAbilities.add("twice");
+              // =====================================================================
+              // kicktwice مُصلح: نبدأ بـ count=2
+              // =====================================================================
               kicktwice.count = 2;
               kicktwice.status = true;
               kicktwice.firstTargetId = null;
               voteTaken = false;
               return;
             } else if (cid === "eliminate_revive") {
+              if (eliminatedPlayers.length === 0) {
+                await ii.reply({ content: "لا يوجد لاعبين لإحيائهم!", ephemeral: true });
+                voteTaken = false;
+                return;
+              }
               const reviveRows = await eliminatedPlayersButtons(eliminatedPlayers);
               if (!reviveRows || reviveRows.length === 0) {
                 await ii.reply({
@@ -1076,27 +1106,37 @@ async function prepareRound(
                 voteTaken = false;
                 return;
               }
-              const replyRev = await ii.reply({
-                content: `🎲 | <@${randomPlayerId}> قرر إحياء لاعب...`,
+              const reviveReply = await ii.reply({
+                content: `🎲 | <@${randomPlayerId}> اختر لاعباً لإحيائه:`,
                 components: reviveRows,
                 ephemeral: true,
                 fetchReply: true,
               });
               await inv.useItem(randomPlayerId, 'revive');
               chooserObj.usedAbilities.add("revive");
-              const reviveCollector = replyRev.createMessageComponentCollector({
+
+              const reviveCollector = reviveReply.createMessageComponentCollector({
                 filter: (r) =>
                   typeof r.customId === "string" &&
                   r.customId.startsWith("revive_") &&
                   r.user.id === randomPlayerId,
-                time: 10000,
+                time: 15000,
               });
+
+              let reviveDone = false;
+
               reviveCollector.on("collect", async (ri) => {
+                if (reviveDone) return;
+                reviveDone = true;
                 const revivedPlayerId = ri.customId.split("_")[1];
                 const revivedPlayer = eliminatedPlayers.find(
                   (p) => p.id === revivedPlayerId
                 );
-                if (!revivedPlayer) return;
+                if (!revivedPlayer) {
+                  await ri.reply({ content: "لاعب غير موجود.", ephemeral: true });
+                  reviveCollector.stop();
+                  return;
+                }
                 await removeLoss(revivedPlayerId, context);
                 players.push(revivedPlayer);
                 eliminatedPlayers.splice(
@@ -1108,26 +1148,54 @@ async function prepareRound(
                   components: [],
                 });
                 reviveCollector.stop();
+                voteTaken = true;
                 stopAll("done");
-                await prepareRound(context, players, eliminatedPlayers, client, callback);
+                await prepareRound(
+                  context,
+                  players,
+                  eliminatedPlayers,
+                  client,
+                  callback
+                );
               });
-              reviveCollector.on("end", (col) => {
-                if (!col || col.size === 0) {
-                  context.channel.send(
-                    `<@${randomPlayerId}> لم تختر أحد للإحياء.`
-                  );
+
+              reviveCollector.on("end", async (col) => {
+                if (!reviveDone) {
+                  await context.channel.send(`<@${randomPlayerId}> لم تختر أحد للإحياء.`);
+                  voteTaken = true;
                   stopAll("done");
-                  prepareRound(context, players, eliminatedPlayers, client, callback);
+                  await prepareRound(
+                    context,
+                    players,
+                    eliminatedPlayers,
+                    client,
+                    callback
+                  );
                 }
               });
               return;
             } else if (cid.startsWith("ability_")) {
               const ability = cid.split("_")[1];
-              // Only freeze remains as active target ability
-              if (ability !== "freeze") {
+
+              // التحقق من أن اللاعب يمتلك القدرة فعلاً
+              const abilityInvMap = {
+                reverse: 'reverse',
+                protect: 'protect',
+                freeze: 'freeze',
+              };
+              const invKeyForAbility = abilityInvMap[ability];
+              if (!invKeyForAbility) {
                 await ii.reply({ content: "قدرة غير معروفة.", ephemeral: true });
+                voteTaken = false;
                 return;
               }
+              const ownedCount = playerInv[invKeyForAbility] || 0;
+              if (ownedCount <= 0) {
+                await ii.reply({ content: "لا تمتلك هذه القدرة!", ephemeral: true });
+                voteTaken = false;
+                return;
+              }
+
               const abilityTargets = players.map(
                 (p) =>
                   new ButtonBuilder()
@@ -1136,27 +1204,36 @@ async function prepareRound(
                     .setLabel(clampLabel(p.username, 80))
                     .setStyle(ButtonStyle.Secondary)
               );
-              const abilityRows = [];
+              const abilityRowsForTarget = [];
               for (let r = 0; r < abilityTargets.length; r += 5)
-                abilityRows.push(
+                abilityRowsForTarget.push(
                   new ActionRowBuilder().addComponents(
                     ...abilityTargets.slice(r, r + 5)
                   )
                 );
-              const replyAb = await ii.reply({
-                content: `اختر لاعب لتطبيق القدرة (${ability}):`,
-                components: abilityRows,
+
+              const abilityReply = await ii.reply({
+                content: `اختر لاعباً لتطبيق القدرة (${ability}):`,
+                components: abilityRowsForTarget,
                 ephemeral: true,
                 fetchReply: true,
               });
-              const abilityCollector = replyAb.createMessageComponentCollector({
-                filter: (ai) =>
-                  typeof ai.customId === "string" &&
-                  ai.customId.startsWith("abilitytarget_") &&
-                  ai.user.id === randomPlayerId,
-                time: 15000,
-              });
+
+              const abilityCollector = abilityReply.createMessageComponentCollector(
+                {
+                  filter: (ai) =>
+                    typeof ai.customId === "string" &&
+                    ai.customId.startsWith("abilitytarget_") &&
+                    ai.user.id === randomPlayerId,
+                  time: 15000,
+                }
+              );
+
+              let abilityDone = false;
+
               abilityCollector.on("collect", async (ai) => {
+                if (abilityDone) return;
+                abilityDone = true;
                 const parts = ai.customId.split("_");
                 const chosenAbility = parts[1];
                 const targetId = parts[2];
@@ -1166,9 +1243,28 @@ async function prepareRound(
                     content: "لا يمكن العثور على اللاعب.",
                     ephemeral: true,
                   });
+                  abilityCollector.stop();
                   return;
                 }
-                if (chosenAbility === "freeze") {
+                if (chosenAbility === "reverse") {
+                  await inv.useItem(randomPlayerId, 'reverse');
+                  targetObj.reverseUntilRound = ROUND_COUNTER + 1;
+                  chooserObj.usedAbilities.add("reverse");
+                  await ai.update({
+                    content: `🔁 | تم تطبيق طرد عكسي على <@${targetId}> للجولة القادمة.`,
+                    components: [],
+                  });
+                  await context.channel.send(`🔁 | <@${randomPlayerId}> طبّق طرد عكسي على لاعب!`);
+                } else if (chosenAbility === "protect") {
+                  await inv.useItem(randomPlayerId, 'protect');
+                  targetObj.protectedUntilRound = ROUND_COUNTER + 1;
+                  chooserObj.usedAbilities.add("protect");
+                  await ai.update({
+                    content: `🛡️ | تم حماية <@${targetId}> للجولة القادمة.`,
+                    components: [],
+                  });
+                  await context.channel.send(`🛡️ | <@${randomPlayerId}> قام بحماية لاعب!`);
+                } else if (chosenAbility === "freeze") {
                   await inv.useItem(randomPlayerId, 'freeze');
                   targetObj.frozenUntilRound = ROUND_COUNTER + 1;
                   chooserObj.usedAbilities.add("freeze");
@@ -1176,6 +1272,7 @@ async function prepareRound(
                     content: `❄️ | تم تجميد <@${targetId}> للجولة القادمة.`,
                     components: [],
                   });
+                  await context.channel.send(`❄️ | <@${randomPlayerId}> قام بتجميد لاعب!`);
                 } else {
                   await ai.update({
                     content: `القدرة غير معروفة.`,
@@ -1183,22 +1280,44 @@ async function prepareRound(
                   });
                 }
                 abilityCollector.stop();
+                voteTaken = true;
                 stopAll("done");
-                await prepareRound(context, players, eliminatedPlayers, client, callback);
+                await prepareRound(
+                  context,
+                  players,
+                  eliminatedPlayers,
+                  client,
+                  callback
+                );
               });
-              abilityCollector.on("end", (col) => {
-                if (!col || col.size === 0) {
+
+              abilityCollector.on("end", async (col) => {
+                if (!abilityDone) {
+                  await context.channel.send(`<@${randomPlayerId}> لم تختر هدفاً للقدرة.`);
+                  voteTaken = true;
                   stopAll("done");
-                  prepareRound(context, players, eliminatedPlayers, client, callback);
+                  await prepareRound(
+                    context,
+                    players,
+                    eliminatedPlayers,
+                    client,
+                    callback
+                  );
                 }
               });
               return;
             } else if (cid.startsWith("eliminate_")) {
               const targetId = cid.split("_")[1];
+              if (!targetId || targetId === "nuclear" || targetId === "twice" || targetId === "revive" || targetId === "random" || targetId === "withdraw") {
+                await ii.reply({ content: "خيار غير صالح.", ephemeral: true });
+                voteTaken = false;
+                return;
+              }
               await handleStandardElimination(randomPlayerId, targetId, ii);
               return;
             } else {
               await ii.reply({ content: "خيار غير معروف.", ephemeral: true });
+              voteTaken = false;
               return;
             }
           } catch (err) {
@@ -1209,14 +1328,24 @@ async function prepareRound(
                 ephemeral: true,
               });
             } catch (e) { }
+            voteTaken = true;
             stopAll("error");
-            await prepareRound(context, players, eliminatedPlayers, client, callback);
+            await prepareRound(
+              context,
+              players,
+              eliminatedPlayers,
+              client,
+              callback
+            );
           }
         });
+
         col.on("end", (collected, reason) => {
           if (
             !voteTaken &&
+            reason !== "done" &&
             reason !== "reset" &&
+            reason !== "error" &&
             !playerHasWithdraw &&
             !hasBeenReset &&
             !kicktwice.status
@@ -1229,10 +1358,16 @@ async function prepareRound(
                 eliminatedPlayers.push(chooserObjOnEnd);
                 lose(randomPlayerId, context);
                 context.channel.send(
-                  `| <@${randomPlayerId}> لم تختر أحد وتم طردك.`
+                  `⏱️ | <@${randomPlayerId}> لم تختر أحد وتم طردك.`
                 );
                 stopAll("timeout");
-                prepareRound(context, players, eliminatedPlayers, client, callback);
+                prepareRound(
+                  context,
+                  players,
+                  eliminatedPlayers,
+                  client,
+                  callback
+                );
               }
             } catch (e) {
               console.error("Error handling no-vote end:", e);
@@ -1250,7 +1385,13 @@ async function prepareRound(
         "حدث خطأ أثناء اختيار اللاعب. سيتم اختيار لاعب عشوائي للمتابعة."
       );
       await sleep(4500);
-      await prepareRound(context, players, eliminatedPlayers, client, callback);
+      await prepareRound(
+        context,
+        players,
+        eliminatedPlayers,
+        client,
+        callback
+      );
     }
   } catch (err) {
     console.error("Fatal error in prepareRound:", err);
