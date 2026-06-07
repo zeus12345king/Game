@@ -1,4 +1,3 @@
-
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -124,7 +123,8 @@ async function startGame(context, nowTime, callback) {
   const players = [];
   const endTime = nowTime + TIME_TO_START / 1000;
 
-  let content = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
+  // إخفاء النص والإبقاء على الصورة والأزرار فقط
+  let content = "";
 
   const lobbyImageFile = await loadGameImage(config.lobbyImages.roulette, "lobby.png");
 
@@ -154,21 +154,8 @@ async function startGame(context, nowTime, callback) {
 
   const sentMessage = await context.reply(sendOptions);
 
-  async function updateLobbyView() {
-    try {
-      const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
-      await sentMessage.edit({ content: newContent });
-    } catch (e) {
-      console.error("Failed to update lobby view:", e);
-    }
-  }
-
-  const updateInterval = setInterval(async () => {
-    try {
-      const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
-      await sentMessage.edit({ content: newContent }).catch(() => {});
-    } catch (e) {}
-  }, 10000);
+  // لا حاجة لتحديث النص، نكتفي بالصورة والأزرار
+  // سنبقي المتجر والانضمام كما هو
 
   const filter = (i) => {
     try {
@@ -207,7 +194,7 @@ async function startGame(context, nowTime, callback) {
           content: `🎲 | <@${i.user.id}> انضممت للعبة في المكان ${index + 1}!`,
           ephemeral: true,
         });
-        await updateLobbyView();
+        // لا حاجة لتحديث محتوى الرسالة الرئيسية
       } else if (i.customId === "exit") {
         if (!players.some((p) => p.id === i.user.id)) {
           await i.reply({ content: "🎲 | أنت لست في اللعبة!", ephemeral: true });
@@ -216,7 +203,7 @@ async function startGame(context, nowTime, callback) {
         const removed = players.find((p) => p.id === i.user.id);
         players.splice(players.indexOf(removed), 1);
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
-        await updateLobbyView();
+        // لا حاجة لتحديث النص
       } else if (i.customId === "open_shop_lobby") {
         const chooserScore = await db.getUserPoints(i.user.id) || 0;
         const costs = config.abilityCosts.roulette;
@@ -243,29 +230,34 @@ async function startGame(context, nowTime, callback) {
           { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: usedAbilities.has("revive"), requireEliminated: true },
         ];
 
-        const shopRows = [];
-        for (let s = 0; s < shopItems.length; s += 3) {
-          const row = new ActionRowBuilder();
-          shopItems.slice(s, s + 3).forEach(item => {
-            const canAfford = chooserScore >= item.cost;
-            const disabled = item.used || !canAfford;
-            const labelText = item.used
-              ? `${item.label} (مستخدم)`
-              : item.label;
-            row.addComponents(
-              new ButtonBuilder()
-                .setCustomId(item.id)
-                .setEmoji(abilityEmojis[item.invKey] || "❓")
-                .setLabel(labelText.substring(0, 80))
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(disabled)
-            );
-          });
-          shopRows.push(row);
-        }
+        const buildShopRows = (points, invData, usedSet) => {
+          const rows = [];
+          for (let s = 0; s < shopItems.length; s += 3) {
+            const row = new ActionRowBuilder();
+            shopItems.slice(s, s + 3).forEach(item => {
+              const canAfford = points >= item.cost;
+              const disabled = usedSet.has(item.invKey) || !canAfford;
+              const labelText = usedSet.has(item.invKey) ? `${item.label} (مستخدم)` : item.label;
+              row.addComponents(
+                new ButtonBuilder()
+                  .setCustomId(item.id)
+                  .setEmoji(abilityEmojis[item.invKey] || "❓")
+                  .setLabel(labelText.substring(0, 80))
+                  .setStyle(ButtonStyle.Secondary)
+                  .setDisabled(disabled)
+              );
+            });
+            rows.push(row);
+          }
+          return rows;
+        };
+
+        let currentPoints = chooserScore;
+        let currentUsed = usedAbilities;
+        let shopRows = buildShopRows(currentPoints, playerInv, currentUsed);
 
         const replyPayload = {
-          content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
+          content: `<:z13:1512229604147068948> | رصيدك: **${currentPoints}**`,
           components: shopRows,
           ephemeral: true,
           fetchReply: true,
@@ -276,32 +268,38 @@ async function startGame(context, nowTime, callback) {
 
         const shopCollector = replyMessage.createMessageComponentCollector({
           filter: (shopI) => shopI.user.id === i.user.id,
-          time: 30000,
+          time: 60000, // مدة أطول
         });
 
         shopCollector.on("collect", async (shopI) => {
           const chosenItem = shopItems.find(item => item.id === shopI.customId);
           if (!chosenItem) return;
-          if (chosenItem.used) {
+          if (currentUsed.has(chosenItem.invKey)) {
             await shopI.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
             return;
           }
-          const currentPoints = await db.getUserPoints(i.user.id) || 0;
-          if (currentPoints < chosenItem.cost) {
+          const freshPoints = await db.getUserPoints(i.user.id) || 0;
+          if (freshPoints < chosenItem.cost) {
             await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
             return;
           }
           await db.removePoints(i.user.id, chosenItem.cost);
           await inv.addItem(i.user.id, chosenItem.invKey, 1);
+          currentUsed.add(chosenItem.invKey);
+          const newPoints = await db.getUserPoints(i.user.id) || 0;
+          const newInv = await inv.getItems(i.user.id);
+          const newRows = buildShopRows(newPoints, newInv, currentUsed);
+          await replyMessage.edit({
+            content: `<:z13:1512229604147068948> | رصيدك: **${newPoints}**`,
+            components: newRows,
+          });
           await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
-          shopCollector.stop();
+          // لا نوقف المجمع، يمكنه شراء المزيد
         });
 
         shopCollector.on("end", () => {
           replyMessage.edit({ components: [] }).catch(() => {});
         });
-      } else if (i.customId === "explain") {
-        await i.reply({ content: "لا يوجد شرح متاح حالياً.", ephemeral: true });
       }
     } catch (error) {
       console.error("Error in lobby collector:", error);
@@ -310,7 +308,6 @@ async function startGame(context, nowTime, callback) {
   });
 
   collector.on("end", async () => {
-    clearInterval(updateInterval);
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
@@ -567,33 +564,37 @@ async function prepareRound(
         targetRows.push(new ActionRowBuilder().addComponents(...comps));
       }
 
-      const abilityButtons = [];
-      const abilityDefs = [
-        { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
-        { invKey: 'reverse', cid: 'ability_reverse',   emoji: '<:z8:1512222893772242953>', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('reverse') },
-        { invKey: 'protect', cid: 'ability_protect',   emoji: '<:z9:1512222953826160740>', label: 'حماية',      style: ButtonStyle.Success,   used: chooserUsedAbilities.has('protect') },
-        { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('freeze') },
-        { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('twice') },
-        { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: chooserUsedAbilities.has('revive'), requireElim: true },
-      ];
+      const buildAbilityRows = (invData, usedSet) => {
+        const abilityButtons = [];
+        const abilityDefs = [
+          { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: usedSet.has('nuclear') },
+          { invKey: 'reverse', cid: 'ability_reverse',   emoji: '<:z8:1512222893772242953>', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: usedSet.has('reverse') },
+          { invKey: 'protect', cid: 'ability_protect',   emoji: '<:z9:1512222953826160740>', label: 'حماية',      style: ButtonStyle.Success,   used: usedSet.has('protect') },
+          { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: usedSet.has('freeze') },
+          { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: usedSet.has('twice') },
+          { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: usedSet.has('revive'), requireElim: true },
+        ];
 
-      for (const ab of abilityDefs) {
-        const owned = playerInv[ab.invKey] || 0;
-        if (owned > 0 && !ab.used && (!ab.requireElim || eliminatedPlayers.length > 0)) {
-          abilityButtons.push(
-            new ButtonBuilder()
-              .setCustomId(ab.cid)
-              .setEmoji(ab.emoji)
-              .setLabel(`${ab.label} (${owned}x)`)
-              .setStyle(ab.style)
-          );
+        for (const ab of abilityDefs) {
+          const owned = invData[ab.invKey] || 0;
+          if (owned > 0 && !ab.used && (!ab.requireElim || eliminatedPlayers.length > 0)) {
+            abilityButtons.push(
+              new ButtonBuilder()
+                .setCustomId(ab.cid)
+                .setEmoji(ab.emoji)
+                .setLabel(`${ab.label} (${owned}x)`)
+                .setStyle(ab.style)
+            );
+          }
         }
-      }
+        const rows = [];
+        for (let i = 0; i < abilityButtons.length; i += 5) {
+          rows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
+        }
+        return rows;
+      };
 
-      const abilityRows = [];
-      for (let i = 0; i < abilityButtons.length; i += 5) {
-        abilityRows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
-      }
+      let abilityRows = buildAbilityRows(playerInv, chooserUsedAbilities);
 
       const actionRowButtons = [];
       if (players.length > 2) {
@@ -610,6 +611,13 @@ async function prepareRound(
           .setCustomId("eliminate_withdraw")
           .setEmoji("<:z6:1512127272184975360>")
           .setLabel("الانسحاب")
+          .setStyle(ButtonStyle.Secondary)
+      );
+      actionRowButtons.push(
+        new ButtonBuilder()
+          .setCustomId("open_shop")
+          .setEmoji("<:z13:1512229604147068948>")
+          .setLabel("المتجر")
           .setStyle(ButtonStyle.Secondary)
       );
 
@@ -832,6 +840,7 @@ async function prepareRound(
             const cid = ii.customId;
 
             if (cid === "open_shop") {
+              // فتح المتجر أثناء الجولة مع إبقاء إمكانية الاختيار
               const abilityEmojis = {
                 nuclear: '<:z7:1512214884421734400>',
                 reverse: '<:z8:1512222893772242953>',
@@ -851,37 +860,99 @@ async function prepareRound(
 
               const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
-              const shopRows = [];
-              for (let s = 0; s < shopItems.length; s += 3) {
-                const row = new ActionRowBuilder();
-                shopItems.slice(s, s + 3).forEach(item => {
-                  const canAfford = chooserScore >= item.cost;
-                  const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
-                  const disabled = item.used || !canAfford || !hasElim;
-                  const labelText = item.used
-                    ? `${item.label} (مستخدم)`
-                    : item.label;
-                  row.addComponents(
-                    new ButtonBuilder()
-                      .setCustomId(item.id)
-                      .setEmoji(abilityEmojis[item.invKey] || "❓")
-                      .setLabel(labelText.substring(0, 80))
-                      .setStyle(ButtonStyle.Secondary)
-                      .setDisabled(disabled)
-                  );
-                });
-                shopRows.push(row);
-              }
+              const buildShopRows = (pts, invData, usedSet) => {
+                const rows = [];
+                for (let s = 0; s < shopItems.length; s += 3) {
+                  const row = new ActionRowBuilder();
+                  shopItems.slice(s, s + 3).forEach(item => {
+                    const canAfford = pts >= item.cost;
+                    const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
+                    const disabled = usedSet.has(item.invKey) || !canAfford || !hasElim;
+                    const labelText = usedSet.has(item.invKey) ? `${item.label} (مستخدم)` : item.label;
+                    row.addComponents(
+                      new ButtonBuilder()
+                        .setCustomId(item.id)
+                        .setEmoji(abilityEmojis[item.invKey] || "❓")
+                        .setLabel(labelText.substring(0, 80))
+                        .setStyle(ButtonStyle.Secondary)
+                        .setDisabled(disabled)
+                    );
+                  });
+                  rows.push(row);
+                }
+                return rows;
+              };
 
-              const replyPayload = {
-                content: `🛒 | رصيدك: **${chooserScore}ن**`,
+              let shopCurrentUsed = new Set(chooserUsedAbilities);
+              let shopPoints = await db.getUserPoints(randomPlayerId) || 0;
+              let shopInv = await inv.getItems(randomPlayerId);
+              let shopRows = buildShopRows(shopPoints, shopInv, shopCurrentUsed);
+
+              const shopPayload = {
+                content: `🛒 | رصيدك: **${shopPoints}ن**`,
                 components: shopRows,
                 ephemeral: true,
+                fetchReply: true,
               };
-              if (shopImageFile) replyPayload.files = [shopImageFile];
+              if (shopImageFile) shopPayload.files = [shopImageFile];
 
-              await ii.reply(replyPayload);
-              voteTaken = false;
+              const shopReply = await ii.reply(shopPayload);
+              const shopCollector = shopReply.createMessageComponentCollector({
+                filter: (si) => si.user.id === randomPlayerId,
+                time: 30000,
+              });
+
+              shopCollector.on("collect", async (si) => {
+                const chosenItem = shopItems.find(item => item.id === si.customId);
+                if (!chosenItem) return;
+                if (shopCurrentUsed.has(chosenItem.invKey)) {
+                  await si.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
+                  return;
+                }
+                const freshPoints = await db.getUserPoints(randomPlayerId) || 0;
+                if (freshPoints < chosenItem.cost) {
+                  await si.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
+                  return;
+                }
+                await db.removePoints(randomPlayerId, chosenItem.cost);
+                await inv.addItem(randomPlayerId, chosenItem.invKey, 1);
+                shopCurrentUsed.add(chosenItem.invKey);
+                const newPoints = await db.getUserPoints(randomPlayerId) || 0;
+                const newInv = await inv.getItems(randomPlayerId);
+                const newShopRows = buildShopRows(newPoints, newInv, shopCurrentUsed);
+                await shopReply.edit({
+                  content: `🛒 | رصيدك: **${newPoints}ن**`,
+                  components: newShopRows,
+                });
+                await si.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
+
+                // تحديث أزرار القدرات في رسائل الإقصاء
+                const updatedAbilityRows = buildAbilityRows(newInv, shopCurrentUsed);
+                const newAllRows = [
+                  ...targetRows,
+                  ...updatedAbilityRows,
+                  new ActionRowBuilder().addComponents(...actionRowButtons),
+                ];
+                const newFirstHalf = newAllRows.slice(0, 5);
+                const newSecondHalf = newAllRows.slice(5);
+                if (eliminationMessageA) await eliminationMessageA.edit({ components: newFirstHalf }).catch(() => {});
+                if (eliminationMessageB) {
+                  if (newSecondHalf.length > 0) {
+                    await eliminationMessageB.edit({ components: newSecondHalf }).catch(() => {});
+                  } else {
+                    await eliminationMessageB.delete().catch(() => {});
+                    eliminationMessageB = null;
+                  }
+                }
+                // تحديث usedAbilities في كائن اللاعب ليكون متزامناً
+                chooserObj.usedAbilities = shopCurrentUsed;
+              });
+
+              shopCollector.on("end", () => {
+                shopReply.edit({ components: [] }).catch(() => {});
+              });
+
+              voteTaken = false; // لا يزال بإمكانه الاختيار بعد المتجر
               return;
             }
 
@@ -1039,6 +1110,8 @@ async function prepareRound(
               });
               return;
             } else if (cid.startsWith("ability_")) {
+              // إيقاف مجمعات الإقصاء فوراً لتجنب التداخل
+              stopAll("ability");
               const ability = cid.split("_")[1];
               const abilityTargets = players.map(
                 (p) =>
@@ -1112,7 +1185,7 @@ async function prepareRound(
                   });
                 }
                 abilityCollector.stop();
-                stopAll("done");
+                // الاستعداد للجولة التالية
                 await prepareRound(
                   context,
                   players,
@@ -1123,7 +1196,7 @@ async function prepareRound(
               });
               abilityCollector.on("end", (col) => {
                 if (!col || col.size === 0) {
-                  stopAll("done");
+                  // لم يتم اختيار هدف، ننتقل للجولة التالية
                   prepareRound(
                     context,
                     players,
