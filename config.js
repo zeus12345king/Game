@@ -24,7 +24,7 @@ module.exports = {
     dice:      'https://timg.eu.cc/jYFN4GK30G.png', // نرد 
     hide:      'https://timg.eu.cc/vBgwQ-NM-I.png', // هايد او غميضة 
     rps:       'https://timg.eu.cc/F6skdkx7Z5.png', // حجرة ورقة مقص 
-    bomb:      'https://timg.eu.cc/G8ImtsgN3I.png', // قنبلة 
+    bomb:      'https://iili.io/CqJjT2n.png', // قنبلة 
     replica:   'https://timg.eu.cc/Weat0p7pk_.png', // ريبلكا 
     xo:        'https://timg.eu.cc/mo96RwDxpE.png', // اكس-و 
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
