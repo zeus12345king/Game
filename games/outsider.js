@@ -16,7 +16,6 @@ const {
   MessageFlags,
   InteractionWebhook,
   AttachmentBuilder,
-  EmbedBuilder,
 } = require('discord.js');
 
 const db     = require('../database.js');
@@ -30,12 +29,10 @@ const LOBBY_TIME    = config.lobbyTime?.outsider ?? 60_000;   // ms
 
 // أوقات الأوضاع
 const TIMES = {
-  classic:   { hint: 35_000, guess: 45_000, vote: 25_000 },
+  classic:   { hint: 35_000, vote: 25_000, lastGuess: 30_000 },
   questions: { answer: 50_000, vote: 25_000, minRounds: 4 },
   mission:   { discuss: 60_000, vote: 30_000 },
 };
-
-const MAX_GUESSES = 3;
 
 // ─── الكلمات مُصنَّفة ─────────────────────────────────────────────
 const WORD_BANK = {
@@ -341,7 +338,7 @@ async function runLobby(context, callback) {
 // ════════════════════════════════════════════════════════════════════
 
 async function runClassicMode({ context, players, callback }) {
-  const { hint: HINT_TIME, guess: GUESS_TIME, vote: VOTE_TIME } = TIMES.classic;
+  const { hint: HINT_TIME, vote: VOTE_TIME } = TIMES.classic;
 
   const word        = randomWord();
   const outsiderIdx = Math.floor(Math.random() * players.length);
@@ -436,7 +433,8 @@ async function runClassicMode({ context, players, callback }) {
                 `> **${i + 1}.** ${h.player.displayName}\n> *"${h.hint}"*`
               ).join('\n\n')
             : '> *لا توجد تلميحات!*'
-          ),
+          ) +
+          `\n\n-# الجاسوس بينكم — راقبوا التلميحات وصوّتوا بحذر.`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
@@ -444,80 +442,11 @@ async function runClassicMode({ context, players, callback }) {
 
   await sleep(2000);
 
-  // ── مرحلة التخمين السري ──
-  await sendDM(context.client, outsider,
-    `## 🎯 دورك للتخمين!\n\n` +
-    `التلميحات التي سمعتها:\n${validHints.map((h, i) => `**${i + 1}.** ${h.hint}`).join('\n')}\n\n` +
-    `لديك **${MAX_GUESSES}** محاولات.\n` +
-    `**أرسل تخمينك الآن عبر الدردشة العامة.**`,
-  );
-
-  await context.channel.send({
-    components: [
-      new ContainerBuilder()
-        .setAccentColor(0x8E44AD)
-        .addTextDisplayComponents(t => t.setContent(
-          `## 🎯 دور الجاسوس!\n` +
-          `تم إرسال التلميحات للجاسوس سراً.\n` +
-          `<@${outsider.id}> — لديك **${MAX_GUESSES}** محاولات لتخمين الكلمة.\n` +
-          `-# اكتب تخمينك في المحادثة الآن`,
-        )),
-    ],
-    flags: MessageFlags.IsComponentsV2,
-  });
-
-  // جمع التخمينات
-  let guessed = false;
-  for (let attempt = 1; attempt <= MAX_GUESSES; attempt++) {
-    await context.channel.send({
-      components: [
-        new ContainerBuilder()
-          .setAccentColor(0xE67E22)
-          .addTextDisplayComponents(t => t.setContent(
-            `### 🎲 المحاولة ${attempt}/${MAX_GUESSES}\n` +
-            `<@${outsider.id}> — اكتب تخمينك الآن!\n` +
-            `-# ⏰ ${GUESS_TIME / 1000} ثانية`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-    const guess = await collectMessage(context.channel, outsider.id, GUESS_TIME);
-
-    if (!guess) {
-      await context.channel.send({
-        components: [
-          new ContainerBuilder()
-            .setAccentColor(0x7F8C8D)
-            .addTextDisplayComponents(t => t.setContent(`⏰ انتهى الوقت — المحاولة ${attempt} ضائعة.`)),
-        ],
-        flags: MessageFlags.IsComponentsV2,
-      });
-      continue;
-    }
-
-    // تحقق التطابق (بدون حساسية للشكل والمسافات)
-    const normalize = s => s.replace(/[\u064B-\u065F]/g, '').trim().toLowerCase();
-    if (normalize(guess) === normalize(word)) {
-      guessed = true;
-      break;
-    }
-
-    await context.channel.send({
-      components: [
-        new ContainerBuilder()
-          .setAccentColor(0xE74C3C)
-          .addTextDisplayComponents(t => t.setContent(
-            `❌ **"${guess}"** — خاطئ!\n` +
-            `-# تبقى ${MAX_GUESSES - attempt} محاولة`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-  }
-
-  // ── مرحلة التصويت ──
-  await runVotePhase({ context, players, outsider, word, guessed, VOTE_TIME, mode: 'classic', callback });
+  // ═══════════════════════════════════════
+  //  لا يوجد تخمين علني في هذه المرحلة!
+  //  ننتقل مباشرة للتصويت
+  // ═══════════════════════════════════════
+  await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'classic', callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -550,8 +479,8 @@ async function runQuestionsMode({ context, players, callback }) {
     const isOutsider = player.id === outsider.id;
     await sendDM(context.client, player,
       isOutsider
-        ? `🕵️‍♂️ **أنت الجاسوس!**\n\nاللاعبون سيسألون بعضهم البعض.\nأجب بذكاء لتتجنب الكشف!\nبعد ${MIN_ROUNDS} جولات يفتح التصويت.`
-        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nاسأل أسئلة ذكية وراقب الإجابات — الجاسوس لا يعرف الكلمة!`,
+        ? `🕵️‍♂️ **أنت الجاسوس!**\n\nاللاعبون سيسألون بعضهم البعض.\nأجب بذكاء لتتجنب الكشف!\nبعد ${MIN_ROUNDS} جولات يمكن طلب التصويت بكتابة \"تصويت\" أو عبر الأزرار.`
+        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nاسأل أسئلة ذكية وراقب الإجابات — الجاسوس لا يعرف الكلمة!\nبعد ${MIN_ROUNDS} جولات يمكنك طلب التصويت بكتابة \"تصويت\".`,
     );
   }
 
@@ -562,19 +491,30 @@ async function runQuestionsMode({ context, players, callback }) {
       new ContainerBuilder()
         .setAccentColor(0x1ABC9C)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🔍 مرحلة التحقيق\n\n` +
+          `## 🔍 مرحلة التحقيق — الأسئلة المتبادلة\n\n` +
           `**القواعد:**\n` +
           `> • البوت يختار أول سائل عشوائياً\n` +
-          `> • بعد كل إجابة، المُجيب يختار من يسأل التالي\n` +
-          `> • بعد **${MIN_ROUNDS} جولات** يفتح زر التصويت\n` +
-          `> • أي لاعب يستطيع طلب التصويت في أي وقت بعدها\n\n` +
+          `> • بعد كل إجابة، المُجيب يختار من يسأل في الجولة التالية\n` +
+          `> • بعد **${MIN_ROUNDS}** جولات، يمكن لأي لاعب طلب التصويت\n` +
+          `> • لطلب التصويت: اكتب **تصويت** في الشات (ولن يقطع الجولة الحالية)\n` +
+          `> • الهدف: اكتشاف الجاسوس من خلال الأسئلة والأجوبة\n\n` +
           `-# استعدوا!`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
 
-  await sleep(3000);
+  await sleep(2000);
+
+  // جامع رسائل لرصد طلب التصويت بالنص
+  let voteRequestedByText = false;
+  const textVoteCollector = context.channel.createMessageCollector({
+    filter: m => !m.author.bot && players.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
+  });
+  textVoteCollector.on('collect', () => {
+    voteRequestedByText = true;
+    textVoteCollector.stop();
+  });
 
   let rounds = 0;
   let voteRequested = false;
@@ -585,8 +525,8 @@ async function runQuestionsMode({ context, players, callback }) {
     const others = players.filter(p => p.id !== currentAsker.id);
     const target  = others[Math.floor(Math.random() * others.length)];
 
-    // أرسل رسالة السؤال مع أزرار (فقط للسائل) — لأننا في DM-based game نفعل التصويت علناً
-    const questionPromptMsg = await context.channel.send({
+    // أرسل رسالة السؤال
+    await context.channel.send({
       components: [
         new ContainerBuilder()
           .setAccentColor(0xF39C12)
@@ -712,12 +652,22 @@ async function runQuestionsMode({ context, players, callback }) {
       }
     }
 
-    // تحقق هل جميع اللاعبين طلبوا التصويت
-    if (rounds >= MIN_ROUNDS + 10) { voteRequested = true; } // حد أقصى 14 جولة
+    // التحقق من طلب التصويت بالنص (يُطبق بعد إكمال الجولة الحالية)
+    if (voteRequestedByText) {
+      voteRequested = true;
+    }
+
+    // حد أقصى للجولات
+    if (rounds >= MIN_ROUNDS + 10) {
+      voteRequested = true;
+    }
   }
 
+  // إيقاف جامع النص إذا كان لا يزال مفتوحاً
+  try { textVoteCollector.stop(); } catch (_) {}
+
   // ── مرحلة التصويت ──
-  await runVotePhase({ context, players, outsider, word, guessed: false, VOTE_TIME, mode: 'questions', callback });
+  await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'questions', callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -773,8 +723,8 @@ async function runMissionMode({ context, players, callback }) {
     const isOutsider = player.id === outsider.id;
     await sendDM(context.client, player,
       isOutsider
-        ? `🕵️‍♂️ **أنت الجاسوس!**\n\n**مهمتك السرية:**\n> ${mission}\n\nأكمل مهمتك أثناء النقاش دون كشف نفسك!\nإذا نجحت قبل انتهاء الوقت أو التصويت — تفوز!`
-        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nناقشوا الكلمة وحاولوا كشف الجاسوس قبل أن ينجز مهمته السرية!`,
+        ? `🕵️‍♂️ **أنت الجاسوس!**\n\n**مهمتك السرية:**\n> ${mission}\n\nأكمل مهمتك أثناء النقاش دون كشف نفسك!\nإذا نجحت قبل انتهاء الوقت أو التصويت — تفوز!\n\n**ملاحظة:** المجموعة تعرف الكلمة السرية وأنت لا تعرفها، فتحدث بحذر.`
+        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nناقشوا الكلمة وحاولوا كشف الجاسوس قبل أن ينجز مهمته السرية!\n\n**تنبيه:** الجاسوس قد يدفع أحدكم لقول كلمات معينة، انتبهوا!`,
     );
   }
 
@@ -787,10 +737,12 @@ async function runMissionMode({ context, players, callback }) {
         .addTextDisplayComponents(t => t.setContent(
           `## 🔥 مرحلة النقاش الحر\n\n` +
           `**قواعد وضع المهمة:**\n` +
-          `> • الجاسوس لديه **مهمة سرية** يجب إنجازها\n` +
-          `> • المجموعة تعرف الكلمة السرية ومهمتها كشف الجاسوس\n` +
-          `> • النقاش حر لمدة **${DISCUSS_TIME / 1000} ثانية**\n` +
-          `> • إذا أنجز الجاسوس مهمته — يفوز حتى لو كُشف!\n\n` +
+          `> • الجاسوس لديه **مهمة سرية** (تظهر له في الخاص) يجب أن ينجزها خلال النقاش\n` +
+          `> • المهمة غالباً أن يجعل أحد اللاعبين يقول كلمة محددة أو يتصرف بشكل معين\n` +
+          `> • المجموعة تعرف الكلمة السرية والجاسوس لا يعرفها — ناقشوا الكلمة بحرية\n` +
+          `> • النقاش مفتوح لمدة **${DISCUSS_TIME / 1000} ثانية**\n` +
+          `> • إذا أنجز الجاسوس مهمته قبل نهاية الوقت أو التصويت — **يفوز فوراً**\n` +
+          `> • إذا انتهى الوقت دون إنجاز المهمة، يبدأ التصويت\n\n` +
           `-# ابدأوا النقاش الآن!`,
         )),
     ],
@@ -842,21 +794,21 @@ async function runMissionMode({ context, players, callback }) {
     });
 
     await db.addPoints(outsider.id, config.winPoints?.outsider ?? 100);
-    await revealResults({ context, outsider, word, guessed: true, mode: 'mission', mission });
+    await revealResults({ context, outsider, word, mission });
     resetGame();
     callback();
     return;
   }
 
   // ── مرحلة التصويت ──
-  await runVotePhase({ context, players, outsider, word, guessed: false, VOTE_TIME, mode: 'mission', mission, callback });
+  await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'mission', mission, callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  🗳️  مرحلة التصويت (مشتركة بين الأوضاع)
 // ════════════════════════════════════════════════════════════════════
 
-async function runVotePhase({ context, players, outsider, word, guessed, VOTE_TIME, mode, mission, callback }) {
+async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode, mission, callback }) {
   await context.channel.send({
     components: [
       new ContainerBuilder()
@@ -871,41 +823,49 @@ async function runVotePhase({ context, players, outsider, word, guessed, VOTE_TI
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // بناء صفوف التصويت (5 لاعبين كحد أقصى لكل صف)
-  const voteComponents = [];
-  for (let i = 0; i < players.length; i += 4) {
-    const row = new ActionRowBuilder();
-    players.slice(i, i + 4).forEach(p => {
-      row.addComponents(
+  // دالة بناء مكونات التصويت مع عدد الأصوات الحالية
+  function buildVoteContainer(votes) {
+    const rows = [];
+    for (let i = 0; i < players.length; i += 4) {
+      const row = new ActionRowBuilder();
+      players.slice(i, i + 4).forEach(p => {
+        const count = votes.get(p.id) || 0;
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`vote_${p.id}`)
+            .setLabel(`${p.displayName.substring(0, 30)} (${count})`)
+            .setStyle(ButtonStyle.Secondary),
+        );
+      });
+      rows.push(row);
+    }
+    const noneCount = votes.get('none') || 0;
+    rows.push(
+      new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`vote_${p.id}`)
-          .setLabel(p.displayName.substring(0, 40))
-          .setStyle(p.id === outsider.id ? ButtonStyle.Danger : ButtonStyle.Secondary),
-      );
-    });
-    voteComponents.push(row);
+          .setCustomId('vote_none')
+          .setLabel(`لا أشك بأحد 🤷 (${noneCount})`)
+          .setStyle(ButtonStyle.Primary),
+      ),
+    );
+
+    const c = new ContainerBuilder()
+      .setAccentColor(0x8E44AD)
+      .addTextDisplayComponents(t => t.setContent(`🗳️ صوّت على من تشك أنه الجاسوس:`));
+    rows.forEach(row => c.addActionRowComponents(r => {
+      row.components.forEach(b => r.addComponents(b));
+      return r;
+    }));
+    return c;
   }
-  voteComponents.push(
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('vote_none').setLabel('لا أشك بأحد 🤷').setStyle(ButtonStyle.Primary),
-    ),
-  );
-
-  const container = new ContainerBuilder()
-    .setAccentColor(0x8E44AD)
-    .addTextDisplayComponents(t => t.setContent(`🗳️ صوّت على من تشك أنه الجاسوس:`));
-  voteComponents.forEach(row => container.addActionRowComponents(r => {
-    row.components.forEach(b => r.addComponents(b));
-    return r;
-  }));
-
-  const voteMsg = await context.channel.send({
-    components: [container],
-    flags: MessageFlags.IsComponentsV2,
-  });
 
   const votes   = new Map();
   const voters  = new Set();
+
+  let voteMsg = await context.channel.send({
+    components: [buildVoteContainer(votes)],
+    flags: MessageFlags.IsComponentsV2,
+  });
 
   await new Promise(resolve => {
     const col = voteMsg.createMessageComponentCollector({
@@ -924,14 +884,21 @@ async function runVotePhase({ context, players, outsider, word, guessed, VOTE_TI
         return;
       }
       voters.add(i.user.id);
-      votes.set(target, (votes.get(target) ?? 0) + 1);
-      await i.reply({ content: `✅ تم تسجيل صوتك على **${target === 'none' ? 'لا أحد' : players.find(p => p.id === target)?.displayName ?? target}**`, ephemeral: true });
+      votes.set(target, (votes.get(target) || 0) + 1);
+
+      // تحديث رسالة التصويت فوراً لتظهر الأرقام الجديدة
+      try {
+        await i.update({ components: [buildVoteContainer(votes)], flags: MessageFlags.IsComponentsV2 });
+      } catch (_) {
+        // إذا فشل التحديث نرسل ردًا مؤقتًا
+        await i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+      }
     });
 
     col.on('end', resolve);
   });
 
-  // تعطيل الأزرار
+  // تعطيل الأزرار بعد انتهاء الوقت
   try {
     const disabledContainer = new ContainerBuilder()
       .setAccentColor(0x7F8C8D)
@@ -945,43 +912,95 @@ async function runVotePhase({ context, players, outsider, word, guessed, VOTE_TI
     if (id !== 'none' && count > maxVotes) { maxVotes = count; mostVoted = id; }
   }
 
-  const noneVotes = votes.get('none') ?? 0;
+  const noneVotes = votes.get('none') || 0;
   const voteSummary = [...votes.entries()]
     .filter(([id]) => id !== 'none')
     .sort((a, b) => b[1] - a[1])
     .map(([id, c]) => {
       const p = players.find(pl => pl.id === id);
-      return `> <@${id}> (${p?.displayName ?? '?'}) — **${c}** صوت${id === outsider.id ? ' 🕵️' : ''}`;
+      return `> <@${id}> (${p?.displayName ?? '?'}) — **${c}** صوت`;
     });
   if (noneVotes > 0) voteSummary.push(`> لا أحد — **${noneVotes}** صوت`);
 
   const voteCorrect = mostVoted === outsider.id;
   const pts = config.winPoints?.outsider ?? 100;
 
-  // ── تحديد الفائز ──
-  let winner, resultText;
+  // ═══════════════════════════════════════
+  //  المرحلة النهائية: الفرصة الأخيرة للجاسوس في الكلاسيكي
+  // ═══════════════════════════════════════
+  let spyWins = false;
 
-  if (mode === 'classic') {
-    if (guessed && voteCorrect) {
-      // الجاسوس خمّن لكن تم كشفه — المجموعة تفوز
-      winner = 'insiders';
-      resultText = `⚖️ الجاسوس خمّن الكلمة لكن المجموعة كشفته بالتصويت — **المجموعة تفوز!**`;
-    } else if (guessed) {
-      // الجاسوس خمّن ولم يُكشف — الجاسوس يفوز
-      winner = 'outsider';
-      resultText = `🕵️ الجاسوس خمّن الكلمة ولم يُكشف — **الجاسوس يفوز!**`;
-    } else if (voteCorrect) {
-      // الجاسوس لم يخمن وتم كشفه — المجموعة تفوز
-      winner = 'insiders';
-      resultText = `🎯 المجموعة كشفت الجاسوس بالتصويت — **المجموعة تفوز!**`;
+  if (mode === 'classic' && voteCorrect) {
+    // الجاسوس انكشف — لديه فرصة أخيرة لتخمين الكلمة
+    const lastGuessTime = TIMES.classic.lastGuess;
+    await context.channel.send({
+      components: [
+        new ContainerBuilder()
+          .setAccentColor(0xE67E22)
+          .addTextDisplayComponents(t => t.setContent(
+            `## 🎲 فرصة أخيرة للجاسوس!\n` +
+            `<@${outsider.id}> تم كشفك بالتصويت!\n` +
+            `لديك **${lastGuessTime / 1000} ثانية** لتخمين الكلمة السرية بشكل علني.\n` +
+            `إذا كانت تخمينك صحيحًا — تفوز رغم الكشف!\n` +
+            `-# اكتب الكلمة الآن في الشات`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+
+    const finalGuess = await collectMessage(context.channel, outsider.id, lastGuessTime);
+    if (finalGuess) {
+      const normalize = s => s.replace(/[\u064B-\u065F]/g, '').trim().toLowerCase();
+      if (normalize(finalGuess) === normalize(word)) {
+        spyWins = true;
+        await context.channel.send({
+          components: [
+            new ContainerBuilder()
+              .setAccentColor(0x2ECC71)
+              .addTextDisplayComponents(t => t.setContent(`✅ **"${finalGuess}"** — إصابة! الجاسوس خمن الكلمة الصحيحة!`)),
+          ],
+          flags: MessageFlags.IsComponentsV2,
+        });
+      } else {
+        await context.channel.send({
+          components: [
+            new ContainerBuilder()
+              .setAccentColor(0xE74C3C)
+              .addTextDisplayComponents(t => t.setContent(`❌ **"${finalGuess}"** — خطأ. الجاسوس فشل في التخمين.`)),
+          ],
+          flags: MessageFlags.IsComponentsV2,
+        });
+      }
     } else {
-      // الجاسوس لم يخمن ولم يُكشف — الجاسوس يفوز
-      winner = 'outsider';
+      await context.channel.send({
+        components: [
+          new ContainerBuilder()
+            .setAccentColor(0x7F8C8D)
+            .addTextDisplayComponents(t => t.setContent(`⏰ لم يتم التخمين في الوقت المحدد.`)),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+    }
+  } else if (mode === 'classic') {
+    // الجاسوس لم يُكشف — يفوز تلقائياً
+    spyWins = true;
+  } else {
+    // الأوضاع الأخرى: فوز الجاسوس إذا لم يُكشف
+    spyWins = !voteCorrect;
+  }
+
+  // تحديد الفائز
+  const winner = spyWins ? 'outsider' : 'insiders';
+  let resultText;
+  if (mode === 'classic') {
+    if (voteCorrect && spyWins) {
+      resultText = `🕵️ الجاسوس كُشف لكنه خمّن الكلمة الصحيحة — **الجاسوس يفوز!**`;
+    } else if (voteCorrect) {
+      resultText = `🎯 المجموعة كشفت الجاسوس ولم يخمن الكلمة — **المجموعة تفوز!**`;
+    } else {
       resultText = `🕵️ الجاسوس نجا من الكشف — **الجاسوس يفوز!**`;
     }
   } else {
-    // أوضاع أخرى: الكشف بالتصويت فقط
-    winner = voteCorrect ? 'insiders' : 'outsider';
     resultText = voteCorrect
       ? `🎯 المجموعة كشفت الجاسوس — **المجموعة تفوز!**`
       : `🕵️ الجاسوس نجا — **الجاسوس يفوز!**`;
@@ -1022,7 +1041,7 @@ async function runVotePhase({ context, players, outsider, word, guessed, VOTE_TI
 //  كشف النتائج (مساعد)
 // ════════════════════════════════════════════════════════════════════
 
-async function revealResults({ context, outsider, word, guessed, mode, mission }) {
+async function revealResults({ context, outsider, word, mode, mission }) {
   await context.channel.send({
     components: [
       new ContainerBuilder()
