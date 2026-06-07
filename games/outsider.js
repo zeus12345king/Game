@@ -12,7 +12,6 @@ const {
   StringSelectMenuOptionBuilder,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
   MessageFlags,
   InteractionWebhook,
   AttachmentBuilder,
@@ -21,6 +20,8 @@ const {
 const db     = require('../database.js');
 const config = require('../config.js');
 const path   = require('path');
+const https  = require('https');
+const http   = require('http');
 
 // ─── ثوابت ───────────────────────────────────────────────────────
 const MIN_PLAYERS   = 3;
@@ -33,6 +34,10 @@ const TIMES = {
   questions: { answer: 50_000, vote: 25_000, minRounds: 4 },
   mission:   { discuss: 60_000, vote: 30_000 },
 };
+
+// إيموجيات مستعارة من الروليت
+const Z1_EMOJI = "<:z1:1511780346008436946>";
+const Z2_EMOJI = "<:z2:1511780387506880542>";
 
 // ─── الكلمات مُصنَّفة ─────────────────────────────────────────────
 const WORD_BANK = {
@@ -109,85 +114,38 @@ async function sendDM(client, player, content) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  بناء واجهة الاستقبال (Lobby)
+//  أدوات تحميل الصور (مستعارة من الروليت)
 // ════════════════════════════════════════════════════════════════════
 
-function buildLobbyContainer(deadline, players, mode, files = []) {
-  const modeLabel = {
-    classic:   '🎯 الكلاسيكي — تلميحات سرية',
-    questions: '❓ الأسئلة — التحقيق المتبادل',
-    mission:   '💣 المهمة — فريق ضد فريق',
-  }[mode] ?? '🎯 الكلاسيكي';
+async function downloadImage(url) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    protocol
+      .get(url, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`Failed to download image, status ${res.statusCode}`));
+        }
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      })
+      .on('error', reject);
+  });
+}
 
-  const playerList = players.length
-    ? players.map((p, i) => `> \`${String(i + 1).padStart(2, '0')}\` <@${p.id}>`).join('\n')
-    : '> *لا يوجد لاعبون بعد — كن أول المنضمين!*';
-
-  // صورة اللوبي
-  const img = config.lobbyImages?.outsider;
-  let mediaSection = null;
-  if (img) {
-    if (!img.startsWith('http://') && !img.startsWith('https://')) {
-      const fileName = path.basename(img);
-      files.push(new AttachmentBuilder(img, { name: fileName }));
-      mediaSection = `attachment://${fileName}`;
+async function loadGameImage(imagePathOrUrl, fallbackFileName = 'image.png') {
+  if (!imagePathOrUrl) return null;
+  try {
+    if (imagePathOrUrl.startsWith('http://') || imagePathOrUrl.startsWith('https://')) {
+      const buffer = await downloadImage(imagePathOrUrl);
+      return new AttachmentBuilder(buffer, { name: fallbackFileName });
     } else {
-      mediaSection = img;
+      return new AttachmentBuilder(imagePathOrUrl, { name: path.basename(imagePathOrUrl) });
     }
+  } catch (e) {
+    console.error(`Failed to load image from ${imagePathOrUrl}:`, e);
+    return null;
   }
-
-  const bar = '█'.repeat(Math.round((players.length / MAX_PLAYERS) * 10))
-            + '░'.repeat(10 - Math.round((players.length / MAX_PLAYERS) * 10));
-
-  const c = new ContainerBuilder().setAccentColor(config.colors?.outsider ?? 0x6C3483);
-
-  if (mediaSection) {
-    c.addMediaGalleryComponents(g => g.addItems(item => item.setURL(mediaSection)));
-  }
-
-  c.addTextDisplayComponents(t => t.setContent(
-    `# 🕵️‍♂️ لعبة الجاسوس\n` +
-    `### الوضع: ${modeLabel}\n` +
-    `⏰ ينتهي الانضمام: <t:${Math.floor(Date.now() / 1000) + Math.floor(LOBBY_TIME / 1000)}:R>\n\n` +
-    `**اللاعبون \`${players.length}/${MAX_PLAYERS}\`**\n` +
-    `\`${bar}\`\n\n` +
-    `${playerList}`,
-  ));
-
-  c.addSeparatorComponents(s => s.setSpacing(1));
-
-  // سلكت منيو لاختيار الوضع
-  const modeSelect = new StringSelectMenuBuilder()
-    .setCustomId('mode_select')
-    .setPlaceholder('🎮 اختر وضع اللعب')
-    .addOptions(
-      new StringSelectMenuOptionBuilder()
-        .setLabel('الكلاسيكي')
-        .setDescription('كل لاعب يعطي تلميحاً، والجاسوس يخمن سراً')
-        .setValue('classic')
-        .setEmoji('🎯')
-        .setDefault(mode === 'classic'),
-      new StringSelectMenuOptionBuilder()
-        .setLabel('الأسئلة')
-        .setDescription('اللاعبون يسألون بعضهم — اكتشف الجاسوس!')
-        .setValue('questions')
-        .setEmoji('❓')
-        .setDefault(mode === 'questions'),
-      new StringSelectMenuOptionBuilder()
-        .setLabel('المهمة')
-        .setDescription('جاسوس يقاوم مجموعة — ومهمة خفية يجب إنجازها')
-        .setValue('mission')
-        .setEmoji('💣')
-        .setDefault(mode === 'mission'),
-    );
-
-  c.addActionRowComponents(r => r.setComponents(modeSelect));
-  c.addActionRowComponents(r => r.setComponents(
-    new ButtonBuilder().setCustomId('join').setLabel('انضمام').setStyle(ButtonStyle.Success).setEmoji('✋'),
-    new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Danger).setEmoji('🚪'),
-  ));
-
-  return c;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -201,15 +159,7 @@ module.exports = {
   async execute(message, args, callback) {
     if (GAME_ACTIVE) {
       await message.reply({
-        content: '',
-        components: [
-          new ContainerBuilder()
-            .setAccentColor(0xE74C3C)
-            .addTextDisplayComponents(t => t.setContent(
-              '### ⛔ اللعبة تعمل بالفعل!\nانتظر انتهاء الجولة الحالية ثم حاول مرة أخرى.',
-            )),
-        ],
-        flags: MessageFlags.IsComponentsV2,
+        content: '### ⛔ اللعبة تعمل بالفعل!\nانتظر انتهاء الجولة الحالية ثم حاول مرة أخرى.',
       });
       callback();
       return;
@@ -221,31 +171,101 @@ module.exports = {
 };
 
 // ════════════════════════════════════════════════════════════════════
-//  مرحلة الاستقبال (Lobby)
+//  مرحلة الاستقبال (Lobby) — تصميم روليت معدل
 // ════════════════════════════════════════════════════════════════════
 
 async function runLobby(context, callback) {
+  const nowTime = Math.floor(Date.now() / 1000);
+  const endTime = nowTime + Math.floor(LOBBY_TIME / 1000);
+
   let players = [];
   let currentMode = 'classic';
   const hostId = context.author?.id ?? context.user?.id;
 
-  const files = [];
-  const lobbyMsg = await context.reply({
-    components: [buildLobbyContainer(Date.now(), players, currentMode, files)],
-    flags: MessageFlags.IsComponentsV2,
-    files,
-    fetchReply: true,
-  });
+  // صورة اللوبي (إن وجدت)
+  const lobbyImageFile = await loadGameImage(config.lobbyImages?.outsider, 'lobby.png');
 
-  const col = lobbyMsg.createMessageComponentCollector({
-    filter: i =>
-      i.customId === 'join' ||
-      i.customId === 'exit' ||
-      i.customId === 'mode_select',
+  // بناء محتوى البداية
+  const buildContent = () =>
+    `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
+
+  // بناء الأزرار
+  const buildComponents = () => {
+    const rows = [];
+
+    // صف أزرار الدخول والخروج
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('join')
+        .setEmoji(Z1_EMOJI)
+        .setLabel('دخول')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('exit')
+        .setEmoji(Z2_EMOJI)
+        .setLabel('خروج')
+        .setStyle(ButtonStyle.Secondary),
+    );
+    rows.push(actionRow);
+
+    // صف قائمة اختيار الوضع (أسفل أزرار الدخول والخروج)
+    const modeSelect = new StringSelectMenuBuilder()
+      .setCustomId('mode_select')
+      .setPlaceholder('🎮 اختر وضع اللعب')
+      .addOptions(
+        new StringSelectMenuOptionBuilder()
+          .setLabel('الكلاسيكي')
+          .setDescription('كل لاعب يعطي تلميحاً، والجاسوس يخمن سراً')
+          .setValue('classic')
+          .setEmoji('🎯')
+          .setDefault(currentMode === 'classic'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('الأسئلة')
+          .setDescription('اللاعبون يسألون بعضهم — اكتشف الجاسوس!')
+          .setValue('questions')
+          .setEmoji('❓')
+          .setDefault(currentMode === 'questions'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('المهمة')
+          .setDescription('جاسوس يقاوم مجموعة — ومهمة خفية يجب إنجازها')
+          .setValue('mission')
+          .setEmoji('💣')
+          .setDefault(currentMode === 'mission'),
+      );
+    rows.push(new ActionRowBuilder().addComponents(modeSelect));
+
+    return rows;
+  };
+
+  // إرسال رسالة اللوبي الأولية
+  const sendOptions = {
+    content: buildContent(),
+    components: buildComponents(),
+    fetchReply: true,
+  };
+  if (lobbyImageFile) sendOptions.files = [lobbyImageFile];
+
+  const lobbyMsg = await context.reply(sendOptions);
+
+  // تحديث كل 10 ثوانٍ للعداد وعدد اللاعبين
+  const updateInterval = setInterval(async () => {
+    try {
+      await lobbyMsg.edit({ content: buildContent() }).catch(() => {});
+    } catch (e) {}
+  }, 10_000);
+
+  // جامع الأزرار
+  const filter = (i) =>
+    i.customId === 'join' ||
+    i.customId === 'exit' ||
+    i.customId === 'mode_select';
+
+  const collector = lobbyMsg.createMessageComponentCollector({
+    filter,
     time: LOBBY_TIME,
   });
 
-  col.on('collect', async i => {
+  collector.on('collect', async (i) => {
     // ── تغيير الوضع (المضيف فقط) ──
     if (i.customId === 'mode_select') {
       if (i.user.id !== hostId) {
@@ -253,11 +273,10 @@ async function runLobby(context, callback) {
         return;
       }
       currentMode = i.values[0];
-      const newFiles = [];
       await i.update({
-        components: [buildLobbyContainer(Date.now(), players, currentMode, newFiles)],
-        flags: MessageFlags.IsComponentsV2,
-        files: newFiles,
+        content: buildContent(),
+        components: buildComponents(),
+        files: lobbyImageFile ? [lobbyImageFile] : [],
       });
       return;
     }
@@ -286,46 +305,32 @@ async function runLobby(context, callback) {
       players = players.filter(p => p.id !== i.user.id);
     }
 
-    const upFiles = [];
     await i.update({
-      components: [buildLobbyContainer(Date.now(), players, currentMode, upFiles)],
-      flags: MessageFlags.IsComponentsV2,
-      files: upFiles,
+      content: buildContent(),
+      components: buildComponents(),
+      files: lobbyImageFile ? [lobbyImageFile] : [],
     });
   });
 
-  col.on('end', async () => {
-    // أغلق اللوبي
+  collector.on('end', async () => {
+    clearInterval(updateInterval);
+    // إخفاء الأزرار والقائمة
     try {
-      await lobbyMsg.edit({
-        components: [
-          new ContainerBuilder()
-            .setAccentColor(0x7F8C8D)
-            .addTextDisplayComponents(t => t.setContent(
-              `### 🔒 انتهى وقت الانضمام\nاللاعبون: ${players.map(p => `<@${p.id}>`).join(' • ') || 'لا يوجد'}`,
-            )),
-        ],
-        flags: MessageFlags.IsComponentsV2,
-      });
+      await lobbyMsg.edit({ content: '', components: [] }).catch(() => {});
     } catch (_) {}
 
+    // إذا لم يكتمل العدد
     if (players.length < MIN_PLAYERS) {
-      await context.channel.send({
-        components: [
-          new ContainerBuilder()
-            .setAccentColor(0xE74C3C)
-            .addTextDisplayComponents(t => t.setContent(
-              `### ❌ لم يكتمل العدد\nيحتاج الحد الأدنى **${MIN_PLAYERS} لاعبين**.\nاللاعبون المنضمون: ${players.length}`,
-            )),
-        ],
-        flags: MessageFlags.IsComponentsV2,
-      });
+      await context.channel.send('🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.');
       resetGame();
       callback();
       return;
     }
 
-    // ابدأ الوضع المناسب
+    // بدء اللعبة
+    await context.channel.send('<:z3:1511872921142825040> | تم الانتهاء من تسجيل اللاعبين، ستبدأ اللعبة بعد قليل...');
+    await sleep(4000);
+
     const opts = { context, players, callback };
     if      (currentMode === 'questions') await runQuestionsMode(opts);
     else if (currentMode === 'mission')   await runMissionMode(opts);
@@ -334,7 +339,7 @@ async function runLobby(context, callback) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  🎯  الوضع الكلاسيكي
+//  🎯  الوضع الكلاسيكي (بدون تخمين مبكر، مع فرصة أخيرة بعد التصويت)
 // ════════════════════════════════════════════════════════════════════
 
 async function runClassicMode({ context, players, callback }) {
@@ -344,9 +349,9 @@ async function runClassicMode({ context, players, callback }) {
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
   const insiders    = players.filter((_, i) => i !== outsiderIdx);
-  const order       = shuffle(insiders); // ترتيب عشوائي للتلميحات
+  const order       = shuffle(insiders);
 
-  // ── إرسال الأدوار سراً ──
+  // إرسال الأدوار سراً
   await context.channel.send({
     components: [
       new ContainerBuilder()
@@ -361,7 +366,6 @@ async function runClassicMode({ context, players, callback }) {
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // إرسال الأدوار عبر DM
   for (const player of players) {
     const isOutsider = player.id === outsider.id;
     await sendDM(context.client, player,
@@ -373,7 +377,7 @@ async function runClassicMode({ context, players, callback }) {
 
   await sleep(4000);
 
-  // ── مرحلة التلميحات ──
+  // مرحلة التلميحات
   await context.channel.send({
     components: [
       new ContainerBuilder()
@@ -392,7 +396,7 @@ async function runClassicMode({ context, players, callback }) {
 
   const hints = [];
   for (const player of order) {
-    const promptMsg = await context.channel.send({
+    await context.channel.send({
       components: [
         new ContainerBuilder()
           .setAccentColor(0xF39C12)
@@ -420,7 +424,6 @@ async function runClassicMode({ context, players, callback }) {
     }
   }
 
-  // ── عرض التلميحات ──
   const validHints = hints.filter(h => h.hint !== null);
   await context.channel.send({
     components: [
@@ -442,15 +445,12 @@ async function runClassicMode({ context, players, callback }) {
 
   await sleep(2000);
 
-  // ═══════════════════════════════════════
-  //  لا يوجد تخمين علني في هذه المرحلة!
-  //  ننتقل مباشرة للتصويت
-  // ═══════════════════════════════════════
+  // الانتقال مباشرة للتصويت (بدون تخمين علني مبكر)
   await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'classic', callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  ❓  وضع الأسئلة
+//  ❓  وضع الأسئلة (مع إمكانية طلب التصويت بالنص دون قطع الجولة)
 // ════════════════════════════════════════════════════════════════════
 
 async function runQuestionsMode({ context, players, callback }) {
@@ -461,7 +461,7 @@ async function runQuestionsMode({ context, players, callback }) {
   const outsider    = players[outsiderIdx];
   const insiders    = players.filter((_, i) => i !== outsiderIdx);
 
-  // ── توزيع الأدوار ──
+  // توزيع الأدوار
   await context.channel.send({
     components: [
       new ContainerBuilder()
@@ -521,11 +521,9 @@ async function runQuestionsMode({ context, players, callback }) {
   let currentAsker = players[Math.floor(Math.random() * players.length)];
 
   while (!voteRequested) {
-    // اختر مستجيب (عشوائي غير السائل)
     const others = players.filter(p => p.id !== currentAsker.id);
     const target  = others[Math.floor(Math.random() * others.length)];
 
-    // أرسل رسالة السؤال
     await context.channel.send({
       components: [
         new ContainerBuilder()
@@ -539,7 +537,6 @@ async function runQuestionsMode({ context, players, callback }) {
       flags: MessageFlags.IsComponentsV2,
     });
 
-    // جمع السؤال من السائل
     const question = await collectMessage(context.channel, currentAsker.id, ANSWER_TIME);
 
     if (!question) {
@@ -551,11 +548,9 @@ async function runQuestionsMode({ context, players, callback }) {
         ],
         flags: MessageFlags.IsComponentsV2,
       });
-      // انتقل لسائل عشوائي آخر
       currentAsker = players[Math.floor(Math.random() * players.length)];
       rounds++;
     } else {
-      // انتظر الإجابة
       await context.channel.send({
         components: [
           new ContainerBuilder()
@@ -583,9 +578,7 @@ async function runQuestionsMode({ context, players, callback }) {
         });
       }
 
-      // بعد MIN_ROUNDS، المُجيب يختار من يسأل التالي أو يطلب تصويت
       if (rounds >= MIN_ROUNDS) {
-        // عرض أزرار الاختيار
         const chooseRow = new ActionRowBuilder();
         const selectablePlayers = players.filter(p => p.id !== target.id);
         selectablePlayers.slice(0, 4).forEach(p => {
@@ -637,7 +630,6 @@ async function runQuestionsMode({ context, players, callback }) {
 
         try { await chooseMsg.delete(); } catch (_) {}
       } else {
-        // قبل MIN_ROUNDS، البوت يختار التالي تلقائياً
         currentAsker = players[Math.floor(Math.random() * players.length)];
         await context.channel.send({
           components: [
@@ -652,30 +644,18 @@ async function runQuestionsMode({ context, players, callback }) {
       }
     }
 
-    // التحقق من طلب التصويت بالنص (يُطبق بعد إكمال الجولة الحالية)
-    if (voteRequestedByText) {
-      voteRequested = true;
-    }
-
-    // حد أقصى للجولات
-    if (rounds >= MIN_ROUNDS + 10) {
-      voteRequested = true;
-    }
+    if (voteRequestedByText) voteRequested = true;
+    if (rounds >= MIN_ROUNDS + 10) voteRequested = true;
   }
 
-  // إيقاف جامع النص إذا كان لا يزال مفتوحاً
   try { textVoteCollector.stop(); } catch (_) {}
 
-  // ── مرحلة التصويت ──
   await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'questions', callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  💣  وضع المهمة
 // ════════════════════════════════════════════════════════════════════
-// الفكرة: الجاسوس لديه مهمة سرية عليه إنجازها خلال النقاش دون أن يُكشف.
-// المجموعة تحاول كشفه قبل أن ينجز مهمته.
-// المهام: ذكر كلمة محددة، إقناع شخص معين بشيء، الخ.
 
 const MISSIONS = [
   'اجعل أحد اللاعبين يذكر كلمة "حار" في إجابته',
@@ -749,7 +729,6 @@ async function runMissionMode({ context, players, callback }) {
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // مراقبة الرسائل للبحث عن إنجاز المهمة
   let missionComplete = false;
   let missionCompleter = null;
 
@@ -774,7 +753,6 @@ async function runMissionMode({ context, players, callback }) {
   });
 
   const timerPromise = sleep(DISCUSS_TIME).then(() => false);
-
   const result = await Promise.race([missionDone, timerPromise]);
 
   if (!discussCol.ended) discussCol.stop();
@@ -800,12 +778,11 @@ async function runMissionMode({ context, players, callback }) {
     return;
   }
 
-  // ── مرحلة التصويت ──
   await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'mission', mission, callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  🗳️  مرحلة التصويت (مشتركة بين الأوضاع)
+//  🗳️  مرحلة التصويت (مع تحديث حي للأرقام وفرصة أخيرة للكلاسيكي)
 // ════════════════════════════════════════════════════════════════════
 
 async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode, mission, callback }) {
@@ -823,7 +800,6 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // دالة بناء مكونات التصويت مع عدد الأصوات الحالية
   function buildVoteContainer(votes) {
     const rows = [];
     for (let i = 0; i < players.length; i += 4) {
@@ -886,11 +862,9 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       voters.add(i.user.id);
       votes.set(target, (votes.get(target) || 0) + 1);
 
-      // تحديث رسالة التصويت فوراً لتظهر الأرقام الجديدة
       try {
         await i.update({ components: [buildVoteContainer(votes)], flags: MessageFlags.IsComponentsV2 });
       } catch (_) {
-        // إذا فشل التحديث نرسل ردًا مؤقتًا
         await i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
       }
     });
@@ -898,7 +872,6 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
     col.on('end', resolve);
   });
 
-  // تعطيل الأزرار بعد انتهاء الوقت
   try {
     const disabledContainer = new ContainerBuilder()
       .setAccentColor(0x7F8C8D)
@@ -906,7 +879,6 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
     await voteMsg.edit({ components: [disabledContainer], flags: MessageFlags.IsComponentsV2 });
   } catch (_) {}
 
-  // حساب النتائج
   let mostVoted = null, maxVotes = 0;
   for (const [id, count] of votes) {
     if (id !== 'none' && count > maxVotes) { maxVotes = count; mostVoted = id; }
@@ -925,13 +897,9 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
   const voteCorrect = mostVoted === outsider.id;
   const pts = config.winPoints?.outsider ?? 100;
 
-  // ═══════════════════════════════════════
-  //  المرحلة النهائية: الفرصة الأخيرة للجاسوس في الكلاسيكي
-  // ═══════════════════════════════════════
   let spyWins = false;
 
   if (mode === 'classic' && voteCorrect) {
-    // الجاسوس انكشف — لديه فرصة أخيرة لتخمين الكلمة
     const lastGuessTime = TIMES.classic.lastGuess;
     await context.channel.send({
       components: [
@@ -982,14 +950,11 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       });
     }
   } else if (mode === 'classic') {
-    // الجاسوس لم يُكشف — يفوز تلقائياً
     spyWins = true;
   } else {
-    // الأوضاع الأخرى: فوز الجاسوس إذا لم يُكشف
     spyWins = !voteCorrect;
   }
 
-  // تحديد الفائز
   const winner = spyWins ? 'outsider' : 'insiders';
   let resultText;
   if (mode === 'classic') {
@@ -1006,7 +971,6 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       : `🕵️ الجاسوس نجا — **الجاسوس يفوز!**`;
   }
 
-  // منح النقاط
   if (winner === 'outsider') {
     await db.addPoints(outsider.id, pts);
   } else {
@@ -1015,7 +979,6 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
     }
   }
 
-  // ── عرض النتائج النهائية ──
   await context.channel.send({
     components: [
       new ContainerBuilder()
