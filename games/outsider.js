@@ -25,7 +25,7 @@ const http   = require('http');
 
 // ─── ثوابت ───────────────────────────────────────────────────────
 const MIN_PLAYERS   = 3;
-const MAX_PLAYERS   = 10;
+const MAX_PLAYERS   = 20;
 const LOBBY_TIME    = config.lobbyTime?.outsider ?? 60_000;   // ms
 
 // أوقات الأوضاع
