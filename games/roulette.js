@@ -123,8 +123,7 @@ async function startGame(context, nowTime, callback) {
   const players = [];
   const endTime = nowTime + TIME_TO_START / 1000;
 
-  // إخفاء النص والإبقاء على الصورة والأزرار فقط
-  let content = "";
+  let content = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
 
   const lobbyImageFile = await loadGameImage(config.lobbyImages.roulette, "lobby.png");
 
@@ -154,8 +153,21 @@ async function startGame(context, nowTime, callback) {
 
   const sentMessage = await context.reply(sendOptions);
 
-  // لا حاجة لتحديث النص، نكتفي بالصورة والأزرار
-  // سنبقي المتجر والانضمام كما هو
+  async function updateLobbyView() {
+    try {
+      const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
+      await sentMessage.edit({ content: newContent });
+    } catch (e) {
+      console.error("Failed to update lobby view:", e);
+    }
+  }
+
+  const updateInterval = setInterval(async () => {
+    try {
+      const newContent = `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
+      await sentMessage.edit({ content: newContent }).catch(() => {});
+    } catch (e) {}
+  }, 10000);
 
   const filter = (i) => {
     try {
@@ -194,7 +206,7 @@ async function startGame(context, nowTime, callback) {
           content: `🎲 | <@${i.user.id}> انضممت للعبة في المكان ${index + 1}!`,
           ephemeral: true,
         });
-        // لا حاجة لتحديث محتوى الرسالة الرئيسية
+        await updateLobbyView();
       } else if (i.customId === "exit") {
         if (!players.some((p) => p.id === i.user.id)) {
           await i.reply({ content: "🎲 | أنت لست في اللعبة!", ephemeral: true });
@@ -203,12 +215,11 @@ async function startGame(context, nowTime, callback) {
         const removed = players.find((p) => p.id === i.user.id);
         players.splice(players.indexOf(removed), 1);
         await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
-        // لا حاجة لتحديث النص
+        await updateLobbyView();
       } else if (i.customId === "open_shop_lobby") {
-        const chooserScore = await db.getUserPoints(i.user.id) || 0;
+        let chooserScore = await db.getUserPoints(i.user.id) || 0;
         const costs = config.abilityCosts.roulette;
         const playerInv = await inv.getItems(i.user.id);
-        const usedAbilities = new Set();
 
         const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
@@ -221,28 +232,29 @@ async function startGame(context, nowTime, callback) {
           revive: '<:z12:1512224063819485334>',
         };
 
+        // shop items (passive reverse/protect are now self‑buffs, always purchasable)
         const shopItems = [
-          { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear", used: usedAbilities.has("nuclear") },
-          { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse", used: usedAbilities.has("reverse") },
-          { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect", used: usedAbilities.has("protect") },
-          { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze", used: usedAbilities.has("freeze") },
-          { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice", used: usedAbilities.has("twice") },
-          { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: usedAbilities.has("revive"), requireEliminated: true },
+          { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear" },
+          { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse" },
+          { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect" },
+          { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze" },
+          { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice" },
+          { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", requireEliminated: true },
         ];
 
-        const buildShopRows = (points, invData, usedSet) => {
+        const buildShopRows = (score) => {
           const rows = [];
           for (let s = 0; s < shopItems.length; s += 3) {
             const row = new ActionRowBuilder();
             shopItems.slice(s, s + 3).forEach(item => {
-              const canAfford = points >= item.cost;
-              const disabled = usedSet.has(item.invKey) || !canAfford;
-              const labelText = usedSet.has(item.invKey) ? `${item.label} (مستخدم)` : item.label;
+              const canAfford = score >= item.cost;
+              const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
+              const disabled = !canAfford || !hasElim;
               row.addComponents(
                 new ButtonBuilder()
                   .setCustomId(item.id)
                   .setEmoji(abilityEmojis[item.invKey] || "❓")
-                  .setLabel(labelText.substring(0, 80))
+                  .setLabel(item.label.substring(0, 80))
                   .setStyle(ButtonStyle.Secondary)
                   .setDisabled(disabled)
               );
@@ -252,13 +264,9 @@ async function startGame(context, nowTime, callback) {
           return rows;
         };
 
-        let currentPoints = chooserScore;
-        let currentUsed = usedAbilities;
-        let shopRows = buildShopRows(currentPoints, playerInv, currentUsed);
-
         const replyPayload = {
-          content: `<:z13:1512229604147068948> | رصيدك: **${currentPoints}**`,
-          components: shopRows,
+          content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
+          components: buildShopRows(chooserScore),
           ephemeral: true,
           fetchReply: true,
         };
@@ -268,38 +276,38 @@ async function startGame(context, nowTime, callback) {
 
         const shopCollector = replyMessage.createMessageComponentCollector({
           filter: (shopI) => shopI.user.id === i.user.id,
-          time: 60000, // مدة أطول
+          time: 30000,
         });
 
         shopCollector.on("collect", async (shopI) => {
           const chosenItem = shopItems.find(item => item.id === shopI.customId);
           if (!chosenItem) return;
-          if (currentUsed.has(chosenItem.invKey)) {
-            await shopI.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
-            return;
-          }
-          const freshPoints = await db.getUserPoints(i.user.id) || 0;
-          if (freshPoints < chosenItem.cost) {
+
+          const currentPoints = await db.getUserPoints(i.user.id) || 0;
+          if (currentPoints < chosenItem.cost) {
             await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
             return;
           }
+
           await db.removePoints(i.user.id, chosenItem.cost);
           await inv.addItem(i.user.id, chosenItem.invKey, 1);
-          currentUsed.add(chosenItem.invKey);
-          const newPoints = await db.getUserPoints(i.user.id) || 0;
-          const newInv = await inv.getItems(i.user.id);
-          const newRows = buildShopRows(newPoints, newInv, currentUsed);
-          await replyMessage.edit({
-            content: `<:z13:1512229604147068948> | رصيدك: **${newPoints}**`,
-            components: newRows,
-          });
+          chooserScore = currentPoints - chosenItem.cost; // update local score
+
           await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
-          // لا نوقف المجمع، يمكنه شراء المزيد
+
+          // Update the shop message with new score and button states
+          await replyMessage.edit({
+            content: `<:z13:1512229604147068948> | رصيدك: **${chooserScore}**`,
+            components: buildShopRows(chooserScore),
+          });
+          // collector stays alive, user can buy more
         });
 
         shopCollector.on("end", () => {
           replyMessage.edit({ components: [] }).catch(() => {});
         });
+      } else if (i.customId === "explain") {
+        await i.reply({ content: "لا يوجد شرح متاح حالياً.", ephemeral: true });
       }
     } catch (error) {
       console.error("Error in lobby collector:", error);
@@ -308,6 +316,7 @@ async function startGame(context, nowTime, callback) {
   });
 
   collector.on("end", async () => {
+    clearInterval(updateInterval);
     try {
       await sentMessage.edit({ content: "", components: [] }).catch(() => {});
 
@@ -544,7 +553,7 @@ async function prepareRound(
         return;
       }
 
-      const chooserScore = await db.getUserPoints(randomPlayerId) || 0;
+      let chooserScore = await db.getUserPoints(randomPlayerId) || 0;
       const costs = config.abilityCosts.roulette;
       const playerInv = await inv.getItems(randomPlayerId);
 
@@ -564,37 +573,32 @@ async function prepareRound(
         targetRows.push(new ActionRowBuilder().addComponents(...comps));
       }
 
-      const buildAbilityRows = (invData, usedSet) => {
-        const abilityButtons = [];
-        const abilityDefs = [
-          { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: usedSet.has('nuclear') },
-          { invKey: 'reverse', cid: 'ability_reverse',   emoji: '<:z8:1512222893772242953>', label: 'طرد عكسي',   style: ButtonStyle.Secondary, used: usedSet.has('reverse') },
-          { invKey: 'protect', cid: 'ability_protect',   emoji: '<:z9:1512222953826160740>', label: 'حماية',      style: ButtonStyle.Success,   used: usedSet.has('protect') },
-          { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: usedSet.has('freeze') },
-          { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: usedSet.has('twice') },
-          { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: usedSet.has('revive'), requireElim: true },
-        ];
+      // Active abilities (nuclear, freeze, twice, revive) – remove reverse/protect from active list
+      const abilityButtons = [];
+      const abilityDefs = [
+        { invKey: 'nuclear', cid: 'eliminate_nuclear', emoji: '<:z7:1512214884421734400>', label: 'نووي',       style: ButtonStyle.Danger,    used: chooserUsedAbilities.has('nuclear') },
+        { invKey: 'freeze',  cid: 'ability_freeze',    emoji: '<:z10:1512223654014881852>', label: 'تجميد',      style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('freeze') },
+        { invKey: 'twice',   cid: 'eliminate_twice',   emoji: '<:z11:1512224011357126948>', label: 'طرد مرتين',  style: ButtonStyle.Secondary, used: chooserUsedAbilities.has('twice') },
+        { invKey: 'revive',  cid: 'eliminate_revive',  emoji: '<:z12:1512224063819485334>', label: 'إحياء لاعب', style: ButtonStyle.Success,   used: chooserUsedAbilities.has('revive'), requireElim: true },
+      ];
 
-        for (const ab of abilityDefs) {
-          const owned = invData[ab.invKey] || 0;
-          if (owned > 0 && !ab.used && (!ab.requireElim || eliminatedPlayers.length > 0)) {
-            abilityButtons.push(
-              new ButtonBuilder()
-                .setCustomId(ab.cid)
-                .setEmoji(ab.emoji)
-                .setLabel(`${ab.label} (${owned}x)`)
-                .setStyle(ab.style)
-            );
-          }
+      for (const ab of abilityDefs) {
+        const owned = playerInv[ab.invKey] || 0;
+        if (owned > 0 && !ab.used && (!ab.requireElim || eliminatedPlayers.length > 0)) {
+          abilityButtons.push(
+            new ButtonBuilder()
+              .setCustomId(ab.cid)
+              .setEmoji(ab.emoji)
+              .setLabel(`${ab.label} (${owned}x)`)
+              .setStyle(ab.style)
+          );
         }
-        const rows = [];
-        for (let i = 0; i < abilityButtons.length; i += 5) {
-          rows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
-        }
-        return rows;
-      };
+      }
 
-      let abilityRows = buildAbilityRows(playerInv, chooserUsedAbilities);
+      const abilityRows = [];
+      for (let i = 0; i < abilityButtons.length; i += 5) {
+        abilityRows.push(new ActionRowBuilder().addComponents(...abilityButtons.slice(i, i + 5)));
+      }
 
       const actionRowButtons = [];
       if (players.length > 2) {
@@ -611,13 +615,6 @@ async function prepareRound(
           .setCustomId("eliminate_withdraw")
           .setEmoji("<:z6:1512127272184975360>")
           .setLabel("الانسحاب")
-          .setStyle(ButtonStyle.Secondary)
-      );
-      actionRowButtons.push(
-        new ButtonBuilder()
-          .setCustomId("open_shop")
-          .setEmoji("<:z13:1512229604147068948>")
-          .setLabel("المتجر")
           .setStyle(ButtonStyle.Secondary)
       );
 
@@ -674,26 +671,54 @@ async function prepareRound(
           } catch (e) { }
         });
 
+      // Modified standard elimination that checks passive reverse/protect
       const handleStandardElimination = async (
         chooserId,
         targetId,
         interaction
       ) => {
         const targetObj = players.find((p) => p.id === targetId);
-
         if (!targetObj) return;
 
+        // Check passive reverse (self armor)
+        if (!targetObj.isBot) {
+          const targetInv = await inv.getItems(targetId);
+          if (targetInv.reverse > 0) {
+            // Reflect elimination back to chooser
+            await inv.useItem(targetId, 'reverse');
+            await context.channel.send(`🔄 | <@${targetId}> لديه درع عاكس! تم طرد <@${chooserId}> بدلاً منه.`);
+            // Eliminate the chooser
+            await lose(chooserId, context);
+            const chooserObj = players.find(p => p.id === chooserId);
+            if (chooserObj) {
+              eliminatedPlayers.push(chooserObj);
+              const idx = players.findIndex(p => p.id === chooserId);
+              if (idx !== -1) players.splice(idx, 1);
+            }
+            stopAll("done");
+            await prepareRound(context, players, eliminatedPlayers, client, callback);
+            return;
+          }
+        }
+
+        // Check passive protect (extra life)
+        if (!targetObj.isBot) {
+          const targetInv = await inv.getItems(targetId);
+          if (targetInv.protect > 0) {
+            await inv.useItem(targetId, 'protect');
+            await context.channel.send(`🛡️ | <@${targetId}> محمي بحياة إضافية! لم يتم طرده.`);
+            stopAll("done");
+            await prepareRound(context, players, eliminatedPlayers, client, callback);
+            return;
+          }
+        }
+
+        // Existing active buffs (kept for compatibility)
         if (targetObj.protectedUntilRound >= ROUND_COUNTER) {
           targetObj.protectedUntilRound = 0;
           await context.channel.send(`🛡️ | اللاعب <@${targetId}> محمي! لم يتم طرده.`);
           stopAll("done");
-          await prepareRound(
-            context,
-            players,
-            eliminatedPlayers,
-            client,
-            callback
-          );
+          await prepareRound(context, players, eliminatedPlayers, client, callback);
           return;
         }
 
@@ -701,20 +726,18 @@ async function prepareRound(
           targetObj.reverseUntilRound = 0;
           await context.channel.send(`🔁 | رد الطرد! <@${chooserId}> تم طردك بدلًا من <@${targetId}>!`);
           await lose(chooserId, context);
-          eliminatedPlayers.push(chooserObj);
-          const idx = players.findIndex((p) => p.id === chooserId);
-          if (idx !== -1) players.splice(idx, 1);
+          const chooserObj = players.find(p => p.id === chooserId);
+          if (chooserObj) {
+            eliminatedPlayers.push(chooserObj);
+            const idx = players.findIndex(p => p.id === chooserId);
+            if (idx !== -1) players.splice(idx, 1);
+          }
           stopAll("done");
-          await prepareRound(
-            context,
-            players,
-            eliminatedPlayers,
-            client,
-            callback
-          );
+          await prepareRound(context, players, eliminatedPlayers, client, callback);
           return;
         }
 
+        // Twice handling
         if (kicktwice.status && kicktwice.count > 1) {
           await interaction.reply({
             content: `💣 | تم طرد <@${targetId}>. اختر اللاعب الثاني.`,
@@ -771,28 +794,17 @@ async function prepareRound(
             kicktwice.status = false;
             kicktwice.firstTargetId = null;
             stopAll("done");
-            await prepareRound(
-              context,
-              players,
-              eliminatedPlayers,
-              client,
-              callback
-            );
+            await prepareRound(context, players, eliminatedPlayers, client, callback);
             return;
           }
         } else {
           stopAll("done");
-          await prepareRound(
-            context,
-            players,
-            eliminatedPlayers,
-            client,
-            callback
-          );
+          await prepareRound(context, players, eliminatedPlayers, client, callback);
           return;
         }
       };
 
+      // Fix: collectors on correct messages
       collectors.forEach((col) => {
         col.on("collect", async (ii) => {
           try {
@@ -826,13 +838,7 @@ async function prepareRound(
 
               voteTaken = true;
               stopAll("done");
-              await prepareRound(
-                context,
-                players,
-                eliminatedPlayers,
-                client,
-                callback
-              );
+              await prepareRound(context, players, eliminatedPlayers, client, callback);
               return;
             }
 
@@ -840,7 +846,6 @@ async function prepareRound(
             const cid = ii.customId;
 
             if (cid === "open_shop") {
-              // فتح المتجر أثناء الجولة مع إبقاء إمكانية الاختيار
               const abilityEmojis = {
                 nuclear: '<:z7:1512214884421734400>',
                 reverse: '<:z8:1512222893772242953>',
@@ -851,8 +856,8 @@ async function prepareRound(
               };
               const shopItems = [
                 { id: "eliminate_nuclear", label: "نووي - يطرد الجميع", cost: costs.nuclear, invKey: "nuclear", used: chooserUsedAbilities.has("nuclear") },
-                { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse", used: chooserUsedAbilities.has("reverse") },
-                { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect", used: chooserUsedAbilities.has("protect") },
+                { id: "ability_reverse",   label: "طرد عكسي",           cost: costs.reverse,  invKey: "reverse" },
+                { id: "ability_protect",   label: "حماية لاعب",          cost: costs.protect,  invKey: "protect" },
                 { id: "ability_freeze",    label: "تجميد لاعب",          cost: costs.freeze,   invKey: "freeze", used: chooserUsedAbilities.has("freeze") },
                 { id: "eliminate_twice",   label: "طرد مرتين",           cost: costs.twice,    invKey: "twice", used: chooserUsedAbilities.has("twice") },
                 { id: "eliminate_revive",  label: "إحياء لاعب",          cost: costs.revive,   invKey: "revive", used: chooserUsedAbilities.has("revive"), requireEliminated: true },
@@ -860,15 +865,15 @@ async function prepareRound(
 
               const shopImageFile = await loadGameImage(config.shopImages?.roulette, "shop.png");
 
-              const buildShopRows = (pts, invData, usedSet) => {
+              const buildShopRows = (score) => {
                 const rows = [];
                 for (let s = 0; s < shopItems.length; s += 3) {
                   const row = new ActionRowBuilder();
                   shopItems.slice(s, s + 3).forEach(item => {
-                    const canAfford = pts >= item.cost;
+                    const canAfford = score >= item.cost;
                     const hasElim = !item.requireEliminated || eliminatedPlayers.length > 0;
-                    const disabled = usedSet.has(item.invKey) || !canAfford || !hasElim;
-                    const labelText = usedSet.has(item.invKey) ? `${item.label} (مستخدم)` : item.label;
+                    const disabled = item.used || !canAfford || !hasElim;
+                    const labelText = item.used ? `${item.label} (مستخدم)` : item.label;
                     row.addComponents(
                       new ButtonBuilder()
                         .setCustomId(item.id)
@@ -883,76 +888,55 @@ async function prepareRound(
                 return rows;
               };
 
-              let shopCurrentUsed = new Set(chooserUsedAbilities);
-              let shopPoints = await db.getUserPoints(randomPlayerId) || 0;
-              let shopInv = await inv.getItems(randomPlayerId);
-              let shopRows = buildShopRows(shopPoints, shopInv, shopCurrentUsed);
-
-              const shopPayload = {
-                content: `🛒 | رصيدك: **${shopPoints}ن**`,
-                components: shopRows,
+              const replyPayload = {
+                content: `🛒 | رصيدك: **${chooserScore}**`,
+                components: buildShopRows(chooserScore),
                 ephemeral: true,
                 fetchReply: true,
               };
-              if (shopImageFile) shopPayload.files = [shopImageFile];
+              if (shopImageFile) replyPayload.files = [shopImageFile];
 
-              const shopReply = await ii.reply(shopPayload);
-              const shopCollector = shopReply.createMessageComponentCollector({
-                filter: (si) => si.user.id === randomPlayerId,
+              const replyMsg = await ii.reply(replyPayload);
+
+              const shopCollector = replyMsg.createMessageComponentCollector({
+                filter: (shopI) => shopI.user.id === randomPlayerId,
                 time: 30000,
               });
 
-              shopCollector.on("collect", async (si) => {
-                const chosenItem = shopItems.find(item => item.id === si.customId);
+              shopCollector.on("collect", async (shopI) => {
+                const chosenItem = shopItems.find(item => item.id === shopI.customId);
                 if (!chosenItem) return;
-                if (shopCurrentUsed.has(chosenItem.invKey)) {
-                  await si.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
+                if (chosenItem.used) {
+                  await shopI.reply({ content: "لقد استخدمت هذه القدرة بالفعل.", ephemeral: true });
                   return;
                 }
-                const freshPoints = await db.getUserPoints(randomPlayerId) || 0;
-                if (freshPoints < chosenItem.cost) {
-                  await si.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
+                const currentPoints = await db.getUserPoints(randomPlayerId) || 0;
+                if (currentPoints < chosenItem.cost) {
+                  await shopI.reply({ content: "رصيدك غير كافٍ.", ephemeral: true });
                   return;
                 }
                 await db.removePoints(randomPlayerId, chosenItem.cost);
                 await inv.addItem(randomPlayerId, chosenItem.invKey, 1);
-                shopCurrentUsed.add(chosenItem.invKey);
-                const newPoints = await db.getUserPoints(randomPlayerId) || 0;
-                const newInv = await inv.getItems(randomPlayerId);
-                const newShopRows = buildShopRows(newPoints, newInv, shopCurrentUsed);
-                await shopReply.edit({
-                  content: `🛒 | رصيدك: **${newPoints}ن**`,
-                  components: newShopRows,
-                });
-                await si.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
+                chooserScore = currentPoints - chosenItem.cost;
 
-                // تحديث أزرار القدرات في رسائل الإقصاء
-                const updatedAbilityRows = buildAbilityRows(newInv, shopCurrentUsed);
-                const newAllRows = [
-                  ...targetRows,
-                  ...updatedAbilityRows,
-                  new ActionRowBuilder().addComponents(...actionRowButtons),
-                ];
-                const newFirstHalf = newAllRows.slice(0, 5);
-                const newSecondHalf = newAllRows.slice(5);
-                if (eliminationMessageA) await eliminationMessageA.edit({ components: newFirstHalf }).catch(() => {});
-                if (eliminationMessageB) {
-                  if (newSecondHalf.length > 0) {
-                    await eliminationMessageB.edit({ components: newSecondHalf }).catch(() => {});
-                  } else {
-                    await eliminationMessageB.delete().catch(() => {});
-                    eliminationMessageB = null;
-                  }
-                }
-                // تحديث usedAbilities في كائن اللاعب ليكون متزامناً
-                chooserObj.usedAbilities = shopCurrentUsed;
+                if (chosenItem.invKey === 'nuclear') chooserUsedAbilities.add('nuclear');
+                else if (chosenItem.invKey === 'freeze') chooserUsedAbilities.add('freeze');
+                else if (chosenItem.invKey === 'twice') chooserUsedAbilities.add('twice');
+                else if (chosenItem.invKey === 'revive') chooserUsedAbilities.add('revive');
+
+                await shopI.reply({ content: `<:z3:1511872921142825040> اشتريت **${chosenItem.label}** بنجاح!`, ephemeral: true });
+
+                await replyMsg.edit({
+                  content: `🛒 | رصيدك: **${chooserScore}**`,
+                  components: buildShopRows(chooserScore),
+                });
               });
 
               shopCollector.on("end", () => {
-                shopReply.edit({ components: [] }).catch(() => {});
+                replyMsg.edit({ components: [] }).catch(() => {});
               });
 
-              voteTaken = false; // لا يزال بإمكانه الاختيار بعد المتجر
+              voteTaken = false;
               return;
             }
 
@@ -966,19 +950,32 @@ async function prepareRound(
               playerHasWithdraw = true;
               await lose(randomPlayerId, context);
               stopAll("done");
-              await prepareRound(
-                context,
-                players,
-                eliminatedPlayers,
-                client,
-                callback
-              );
+              await prepareRound(context, players, eliminatedPlayers, client, callback);
               return;
             } else if (cid === "eliminate_random") {
-              let randomTarget =
-                filteredPlayers[
-                Math.floor(Math.random() * filteredPlayers.length)
-                ];
+              let randomTarget = filteredPlayers[Math.floor(Math.random() * filteredPlayers.length)];
+
+              // Check passive items for random target
+              if (!randomTarget.isBot) {
+                const tInv = await inv.getItems(randomTarget.id);
+                if (tInv.reverse > 0) {
+                  await inv.useItem(randomTarget.id, 'reverse');
+                  await context.channel.send(`🔄 | <@${randomTarget.id}> لديه درع عاكس! تم طرد <@${randomPlayerId}> بدلاً منه.`);
+                  await lose(randomPlayerId, context);
+                  eliminatedPlayers.push(chooserObj);
+                  players.splice(players.findIndex(p => p.id === randomPlayerId), 1);
+                  stopAll("done");
+                  await prepareRound(context, players, eliminatedPlayers, client, callback);
+                  return;
+                }
+                if (tInv.protect > 0) {
+                  await inv.useItem(randomTarget.id, 'protect');
+                  await context.channel.send(`🛡️ | <@${randomTarget.id}> محمي! لم يتم طرده.`);
+                  stopAll("done");
+                  await prepareRound(context, players, eliminatedPlayers, client, callback);
+                  return;
+                }
+              }
 
               if (randomTarget.protectedUntilRound >= ROUND_COUNTER) {
                 randomTarget.protectedUntilRound = 0;
@@ -987,6 +984,7 @@ async function prepareRound(
                 await prepareRound(context, players, eliminatedPlayers, client, callback);
                 return;
               }
+
               await context.channel.send(
                 `💣 | <@${randomPlayerId}> قام بطرد عشوائيا اللاعب: <@${randomTarget.id}>`
               );
@@ -997,38 +995,64 @@ async function prepareRound(
                 1
               );
               stopAll("done");
-              await prepareRound(
-                context,
-                players,
-                eliminatedPlayers,
-                client,
-                callback
-              );
+              await prepareRound(context, players, eliminatedPlayers, client, callback);
               return;
             } else if (cid === "eliminate_nuclear") {
               await inv.useItem(randomPlayerId, 'nuclear');
               chooserObj.usedAbilities.add("nuclear");
               const others = players.filter((p) => p.id !== randomPlayerId);
+              let reflected = false;
+
               for (const op of others) {
-                await lose(op.id, context);
-                eliminatedPlayers.push(op);
+                if (op.isBot) continue;
+                const tInv = await inv.getItems(op.id);
+                if (tInv.reverse > 0) {
+                  await inv.useItem(op.id, 'reverse');
+                  reflected = true;
+                  await context.channel.send(`🔄 | <@${op.id}> لديه درع عاكس! تم طرد <@${randomPlayerId}> بدلاً منه.`);
+                  // Eliminate chooser, stop nuclear
+                  await lose(randomPlayerId, context);
+                  eliminatedPlayers.push(chooserObj);
+                  const idx = players.findIndex(p => p.id === randomPlayerId);
+                  if (idx !== -1) players.splice(idx, 1);
+                  for (const other of others) {
+                    if (other.id === op.id) continue; // already protected?
+                    // no additional elimination because nuclear is reflected entirely
+                  }
+                  stopAll("done");
+                  await prepareRound(context, players, eliminatedPlayers, client, callback);
+                  return;
+                }
               }
+
+              // No reflect, process protect and elimination
+              for (const op of others) {
+                if (op.isBot) {
+                  await lose(op.id, context);
+                  eliminatedPlayers.push(op);
+                } else {
+                  const tInv = await inv.getItems(op.id);
+                  if (tInv.protect > 0) {
+                    await inv.useItem(op.id, 'protect');
+                    await context.channel.send(`🛡️ | <@${op.id}> محمي بحياة إضافية! نجا من النووي.`);
+                  } else {
+                    await lose(op.id, context);
+                    eliminatedPlayers.push(op);
+                  }
+                }
+              }
+
               for (let k = players.length - 1; k >= 0; k--) {
                 if (players[k].id !== randomPlayerId) players.splice(k, 1);
               }
+
               await context.channel.send(
                 `☢️ | <@${randomPlayerId}> استخدم النووي وطرد: ${others
                   .map((p) => `<@${p.id}>`)
                   .join(", ")}`
               );
               stopAll("done");
-              await prepareRound(
-                context,
-                players,
-                eliminatedPlayers,
-                client,
-                callback
-              );
+              await prepareRound(context, players, eliminatedPlayers, client, callback);
               return;
             } else if (cid === "eliminate_twice") {
               await ii.reply({
@@ -1043,9 +1067,7 @@ async function prepareRound(
               voteTaken = false;
               return;
             } else if (cid === "eliminate_revive") {
-              const reviveRows = await eliminatedPlayersButtons(
-                eliminatedPlayers
-              );
+              const reviveRows = await eliminatedPlayersButtons(eliminatedPlayers);
               if (!reviveRows || reviveRows.length === 0) {
                 await ii.reply({
                   content: "لا يوجد لاعبين لإحيائهم!",
@@ -1054,14 +1076,15 @@ async function prepareRound(
                 voteTaken = false;
                 return;
               }
-              await ii.reply({
+              const replyRev = await ii.reply({
                 content: `🎲 | <@${randomPlayerId}> قرر إحياء لاعب...`,
                 components: reviveRows,
                 ephemeral: true,
+                fetchReply: true,
               });
               await inv.useItem(randomPlayerId, 'revive');
               chooserObj.usedAbilities.add("revive");
-              const reviveCollector = ii.message.createMessageComponentCollector({
+              const reviveCollector = replyRev.createMessageComponentCollector({
                 filter: (r) =>
                   typeof r.customId === "string" &&
                   r.customId.startsWith("revive_") &&
@@ -1073,6 +1096,7 @@ async function prepareRound(
                 const revivedPlayer = eliminatedPlayers.find(
                   (p) => p.id === revivedPlayerId
                 );
+                if (!revivedPlayer) return;
                 await removeLoss(revivedPlayerId, context);
                 players.push(revivedPlayer);
                 eliminatedPlayers.splice(
@@ -1085,13 +1109,7 @@ async function prepareRound(
                 });
                 reviveCollector.stop();
                 stopAll("done");
-                await prepareRound(
-                  context,
-                  players,
-                  eliminatedPlayers,
-                  client,
-                  callback
-                );
+                await prepareRound(context, players, eliminatedPlayers, client, callback);
               });
               reviveCollector.on("end", (col) => {
                 if (!col || col.size === 0) {
@@ -1099,20 +1117,17 @@ async function prepareRound(
                     `<@${randomPlayerId}> لم تختر أحد للإحياء.`
                   );
                   stopAll("done");
-                  prepareRound(
-                    context,
-                    players,
-                    eliminatedPlayers,
-                    client,
-                    callback
-                  );
+                  prepareRound(context, players, eliminatedPlayers, client, callback);
                 }
               });
               return;
             } else if (cid.startsWith("ability_")) {
-              // إيقاف مجمعات الإقصاء فوراً لتجنب التداخل
-              stopAll("ability");
               const ability = cid.split("_")[1];
+              // Only freeze remains as active target ability
+              if (ability !== "freeze") {
+                await ii.reply({ content: "قدرة غير معروفة.", ephemeral: true });
+                return;
+              }
               const abilityTargets = players.map(
                 (p) =>
                   new ButtonBuilder()
@@ -1128,20 +1143,19 @@ async function prepareRound(
                     ...abilityTargets.slice(r, r + 5)
                   )
                 );
-              await ii.reply({
+              const replyAb = await ii.reply({
                 content: `اختر لاعب لتطبيق القدرة (${ability}):`,
                 components: abilityRows,
                 ephemeral: true,
+                fetchReply: true,
               });
-              const abilityCollector = ii.message.createMessageComponentCollector(
-                {
-                  filter: (ai) =>
-                    typeof ai.customId === "string" &&
-                    ai.customId.startsWith("abilitytarget_") &&
-                    ai.user.id === randomPlayerId,
-                  time: 15000,
-                }
-              );
+              const abilityCollector = replyAb.createMessageComponentCollector({
+                filter: (ai) =>
+                  typeof ai.customId === "string" &&
+                  ai.customId.startsWith("abilitytarget_") &&
+                  ai.user.id === randomPlayerId,
+                time: 15000,
+              });
               abilityCollector.on("collect", async (ai) => {
                 const parts = ai.customId.split("_");
                 const chosenAbility = parts[1];
@@ -1154,23 +1168,7 @@ async function prepareRound(
                   });
                   return;
                 }
-                if (chosenAbility === "reverse") {
-                  await inv.useItem(randomPlayerId, 'reverse');
-                  targetObj.reverseUntilRound = ROUND_COUNTER + 1;
-                  chooserObj.usedAbilities.add("reverse");
-                  await ai.update({
-                    content: `🔁 | تم تطبيق طرد عكسي على <@${targetId}> للجولة القادمة.`,
-                    components: [],
-                  });
-                } else if (chosenAbility === "protect") {
-                  await inv.useItem(randomPlayerId, 'protect');
-                  targetObj.protectedUntilRound = ROUND_COUNTER + 1;
-                  chooserObj.usedAbilities.add("protect");
-                  await ai.update({
-                    content: `🛡️ | تم حماية <@${targetId}> للجولة القادمة.`,
-                    components: [],
-                  });
-                } else if (chosenAbility === "freeze") {
+                if (chosenAbility === "freeze") {
                   await inv.useItem(randomPlayerId, 'freeze');
                   targetObj.frozenUntilRound = ROUND_COUNTER + 1;
                   chooserObj.usedAbilities.add("freeze");
@@ -1185,25 +1183,13 @@ async function prepareRound(
                   });
                 }
                 abilityCollector.stop();
-                // الاستعداد للجولة التالية
-                await prepareRound(
-                  context,
-                  players,
-                  eliminatedPlayers,
-                  client,
-                  callback
-                );
+                stopAll("done");
+                await prepareRound(context, players, eliminatedPlayers, client, callback);
               });
               abilityCollector.on("end", (col) => {
                 if (!col || col.size === 0) {
-                  // لم يتم اختيار هدف، ننتقل للجولة التالية
-                  prepareRound(
-                    context,
-                    players,
-                    eliminatedPlayers,
-                    client,
-                    callback
-                  );
+                  stopAll("done");
+                  prepareRound(context, players, eliminatedPlayers, client, callback);
                 }
               });
               return;
@@ -1224,13 +1210,7 @@ async function prepareRound(
               });
             } catch (e) { }
             stopAll("error");
-            await prepareRound(
-              context,
-              players,
-              eliminatedPlayers,
-              client,
-              callback
-            );
+            await prepareRound(context, players, eliminatedPlayers, client, callback);
           }
         });
         col.on("end", (collected, reason) => {
@@ -1252,13 +1232,7 @@ async function prepareRound(
                   `| <@${randomPlayerId}> لم تختر أحد وتم طردك.`
                 );
                 stopAll("timeout");
-                prepareRound(
-                  context,
-                  players,
-                  eliminatedPlayers,
-                  client,
-                  callback
-                );
+                prepareRound(context, players, eliminatedPlayers, client, callback);
               }
             } catch (e) {
               console.error("Error handling no-vote end:", e);
@@ -1276,13 +1250,7 @@ async function prepareRound(
         "حدث خطأ أثناء اختيار اللاعب. سيتم اختيار لاعب عشوائي للمتابعة."
       );
       await sleep(4500);
-      await prepareRound(
-        context,
-        players,
-        eliminatedPlayers,
-        client,
-        callback
-      );
+      await prepareRound(context, players, eliminatedPlayers, client, callback);
     }
   } catch (err) {
     console.error("Fatal error in prepareRound:", err);
