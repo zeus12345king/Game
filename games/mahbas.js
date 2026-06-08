@@ -26,7 +26,6 @@ const {
   ContainerBuilder,
   MessageFlags,
   AttachmentBuilder,
-  InteractionWebhook,
 } = require('discord.js');
 
 const db     = require('../database.js');
@@ -119,13 +118,17 @@ const sleep     = ms => new Promise(r => setTimeout(r, ms));
 const resetGame = ()  => { GAME_ACTIVE = false; };
 const rnd       = arr => arr[Math.floor(Math.random() * arr.length)];
 
-/** إرسال ephemeral عبر InteractionWebhook */
-async function sendEphemeral(client, player, content, components = []) {
+/**
+ * إرسال رسالة خاصة (DM) للاعب مع أزرار تفاعلية
+ * تُرجع كائن الرسالة لاستخدامه في الـ Collector
+ */
+async function sendDM(client, player, content, components = []) {
   try {
-    const wh = new InteractionWebhook(client, player.appId, player.token);
-    return await wh.send({ content, components, ephemeral: true });
+    const user = await client.users.fetch(player.id);
+    const msg = await user.send({ content, components });
+    return msg;
   } catch (e) {
-    console.error(`[Mahbas] ephemeral فشل لـ ${player.id}:`, e);
+    console.error(`[Mahbas] فشل إرسال DM لـ ${player.id}:`, e);
     return null;
   }
 }
@@ -349,22 +352,20 @@ async function runLobby(context, callback) {
       id,
       displayName : i.member?.displayName ?? displayName,
       avatarURL   : i.user.displayAvatarURL({ extension: 'png', forceStatic: true }),
-      appId       : i.applicationId,
-      token       : i.token,
     };
 
     const inA = teamA.some(p => p.id === id);
     const inB = teamB.some(p => p.id === id);
 
     if (i.customId === 'join_a') {
-      if (inA) { await i.reply({ content: '✅ أنت في الفريق الأول بالفعل!', ephemeral: true }); return; }
-      if (inB) { await i.reply({ content: '⚠️ أنت في الفريق الثاني — اضغط خروج أولاً.', ephemeral: true }); return; }
-      if (teamA.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الأول ممتلئ!', ephemeral: true }); return; }
+      if (inA) { await i.reply({ content: '✅ أنت في الفريق الأول بالفعل!', flags: MessageFlags.Ephemeral }); return; }
+      if (inB) { await i.reply({ content: '⚠️ أنت في الفريق الثاني — اضغط خروج أولاً.', flags: MessageFlags.Ephemeral }); return; }
+      if (teamA.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الأول ممتلئ!', flags: MessageFlags.Ephemeral }); return; }
       teamA.push(playerData);
     } else if (i.customId === 'join_b') {
-      if (inB) { await i.reply({ content: '✅ أنت في الفريق الثاني بالفعل!', ephemeral: true }); return; }
-      if (inA) { await i.reply({ content: '⚠️ أنت في الفريق الأول — اضغط خروج أولاً.', ephemeral: true }); return; }
-      if (teamB.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الثاني ممتلئ!', ephemeral: true }); return; }
+      if (inB) { await i.reply({ content: '✅ أنت في الفريق الثاني بالفعل!', flags: MessageFlags.Ephemeral }); return; }
+      if (inA) { await i.reply({ content: '⚠️ أنت في الفريق الأول — اضغط خروج أولاً.', flags: MessageFlags.Ephemeral }); return; }
+      if (teamB.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الثاني ممتلئ!', flags: MessageFlags.Ephemeral }); return; }
       teamB.push(playerData);
     } else {
       teamA = teamA.filter(p => p.id !== id);
@@ -572,7 +573,7 @@ async function runHidePhase(context, hidingTeam, hidingName, hidingPowers, state
     if (swapUsed) actualHolder = rnd(hidingTeam); // إعادة اختيار عشوائي جديد
   }
 
-  // إرسال رسائل سرية لكل عضو
+  // إرسال رسائل خاصة عبر DM لكل عضو
   const confirmButtons = (playerId) => [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -586,18 +587,33 @@ async function runHidePhase(context, hidingTeam, hidingName, hidingPowers, state
     ),
   ];
 
-  const confirmPromises = hidingTeam.map(player =>
-    sendEphemeral(
-      context.client, player,
-      player.id === actualHolder.id
-        ? `## 💍 أنت تحمل المحبس!\nاضغط الزر للتأكيد سراً — الخصم لا يرى ردودكم.`
-        : `## 🤲 يدك فارغة.\nاضغط أي زر للتمثيل — الخصم لا يرى ردودكم.`,
-      confirmButtons(player.id),
-    ),
-  );
+  const confirmPromises = hidingTeam.map(async (player) => {
+    const isHolder = player.id === actualHolder.id;
+    const content = isHolder
+      ? `## 💍 أنت تحمل المحبس!\nاضغط الزر للتأكيد سراً — الخصم لا يرى ردودكم.`
+      : `## 🤲 يدك فارغة.\nاضغط أي زر للتمثيل — الخصم لا يرى ردودكم.`;
+
+    const msg = await sendDM(context.client, player, content, confirmButtons(player.id));
+    if (!msg) return;
+
+    // جامع يتيح للأزرار أن تعمل وتُعطي ردًا
+    const collector = msg.createMessageComponentCollector({
+      filter: i => i.customId.startsWith('confirm_') && i.user.id === player.id,
+      time: T_HIDE,
+      max: 1,
+    });
+
+    collector.on('collect', async i => {
+      await i.update({
+        content: '✅ تم التأكيد.',
+        components: [],
+      });
+    });
+  });
+
   await Promise.allSettled(confirmPromises);
 
-  // انتظر T_HIDE لإعطاء إيهام الاختيار (لا نحتاج التحقق الفعلي)
+  // انتظر T_HIDE لإعطاء إيهام الاختيار
   await sleep(T_HIDE);
 
   await context.channel.send({
@@ -683,7 +699,7 @@ async function runBluffPhase(context, hidingTeam, hidingName, holder) {
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // إرسال قائمة الإيماءات لكل عضو
+  // إرسال رسائل خاصة لكل عضو مع أزرار اختيار الإيماءة، وجمع اختياراتهم
   const gestureButtons = (playerId) => {
     const rows = [];
     for (let i = 0; i < GESTURES.length; i += 3) {
@@ -701,27 +717,49 @@ async function runBluffPhase(context, hidingTeam, hidingName, holder) {
     return rows;
   };
 
-  // أرسل رسائل الإيماءات
-  for (const player of hidingTeam) {
-    await sendEphemeral(
-      context.client, player,
-      `## 🤌 اختر إيماءة يدك!\nالخصم سيراها — اربكهم!`,
-      gestureButtons(player.id),
-    );
-  }
+  // تخزين الإيماءات المختارة (أو null إن لم يُختر)
+  const chosenGestures = {};
 
-  // انتظر وجمع الردود (لن نجمعها فعلاً عبر ephemeral — نختار عشوائياً مع احترام المنطق)
-  // ملاحظة: Ephemeral collectors غير مدعومة بالكامل خارج التفاعل الأصلي
-  // لذا نتعامل مع الإيماءات كاختيارات عشوائية مرئية للخصم مع تثبيت الحامل
+  const gesturePromises = hidingTeam.map(async (player) => {
+    const msg = await sendDM(context.client, player, `## 🤌 اختر إيماءة يدك!\nالخصم سيراها — اربكهم!`, gestureButtons(player.id));
+    if (!msg) return;
+
+    const collector = msg.createMessageComponentCollector({
+      filter: i => i.customId.startsWith(`gest_${player.id}_`) && i.user.id === player.id,
+      time: T_BLUFF,
+      max: 1,
+    });
+
+    collector.on('collect', async i => {
+      const gestureId = i.customId.replace(`gest_${player.id}_`, '');
+      const gesture = GESTURES.find(g => g.id === gestureId);
+      chosenGestures[player.id] = gesture;
+
+      await i.update({
+        content: `✅ تم اختيار: ${gesture.emoji} ${gesture.label}`,
+        components: [],
+      });
+    });
+
+    collector.on('end', () => {
+      if (!chosenGestures[player.id]) {
+        // لم يختر → عشوائي
+        chosenGestures[player.id] = rnd(GESTURES);
+      }
+    });
+  });
+
+  await Promise.allSettled(gesturePromises);
   await sleep(T_BLUFF);
 
-  // توليد إيماءات عشوائية لكل لاعب (الواجهة للخصم)
-  const gestures = {};
+  // تأكد أن جميع اللاعبين لديهم إيماءة (حتى لو تعذر الإرسال)
   for (const player of hidingTeam) {
-    gestures[player.id] = rnd(GESTURES);
+    if (!chosenGestures[player.id]) {
+      chosenGestures[player.id] = rnd(GESTURES);
+    }
   }
 
-  return gestures;
+  return chosenGestures;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -878,7 +916,8 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
     // بناء أزرار الفريق المخبي
     const btnRows = buildPlayerButtons(hidingTeam, `guess${attempt}`);
 
-    const guessMsg = await context.channel.send({
+    // إرسال رسالة النص (ContainerBuilder) لوحدها
+    await context.channel.send({
       components: [
         new ContainerBuilder().setAccentColor(attempt === 1 ? CLR.gold : CLR.warn)
           .addTextDisplayComponents(t => t.setContent(
@@ -887,14 +926,12 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
             `> 🏆 الإجابة الصحيحة = **${pts} نقطة**\n` +
             `> ⏰ ${guessTimeLeft / 1000} ثانية\n\n` +
             `-# ${guessingTeam.map(p => `<@${p.id}>`).join(' ')} — أي فرد يستطيع التخمين`,
-          ))
-          // نضيف الأزرار عبر addActionRowComponents
-          ,...btnRows.map(row => ({ type: 'action_row', components: row.components })),
+          )),
       ],
       flags: MessageFlags.IsComponentsV2,
     });
 
-    // إرسال رسالة منفصلة مع الأزرار (ContainerBuilder لا يدعم مزج ActionRow مع TextDisplay بنفس الطريقة)
+    // إرسال رسالة منفصلة مع الأزرار فقط
     const guessControls = await context.channel.send({
       components: btnRows,
     });
