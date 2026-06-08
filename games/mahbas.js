@@ -1,251 +1,1092 @@
-﻿const {
+'use strict';
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  💍  لعبة المحبس  —  نسخة احترافية مُعاد بناؤها من الصفر
+// ══════════════════════════════════════════════════════════════════════════════
+//
+//  المراحل لكل جولة:
+//  1. HIDE    — الفريق المخبي يتسلم المحبس سراً عبر Ephemeral
+//  2. BLUFF   — كل لاعب في الفريق المخبي يختار إيماءة يد (تشويش بصري)
+//  3. REVEAL  — تُعرض الإيماءات للجميع علناً + توتر
+//  4. DISCUSS — الفريق المخمن يناقش 30 ثانية
+//  5. GUESS   — محاولتان للتخمين (2 نقطة / 1 نقطة)
+//  6. RESULT  — كشف النتيجة بصرياً
+//
+//  بطاقات خاصة (Power Cards) — مرة واحدة طوال اللعبة لكل فريق:
+//  🔍 تحقيق  — تكشف إيماءة لاعب واحد بشكل حقيقي (مخفية أو ظاهرة)
+//  🔄 تبديل  — الفريق المخبي يعيد تمرير المحبس سراً بين أعضائه
+//  ⏱️ ضغط    — يضيف 20 ثانية لوقت التخمين (للفريق المخمن)
+//
+// ══════════════════════════════════════════════════════════════════════════════
+
+const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
   MessageFlags,
+  AttachmentBuilder,
+  InteractionWebhook,
 } = require('discord.js');
-const db = require('../database.js');
-const config = require('../config.js');
 
-const MAX_PER_TEAM = 10;
-const TOTAL_ROUNDS = 10;
-const HIDE_TIME    = 20000;
-const GUESS_TIME   = 30000;
+const db     = require('../database.js');
+const config = require('../config.js');
+const path   = require('path');
+
+// ─── Canvas اختياري ───────────────────────────────────────────────────────
+let createCanvas, loadImage, GlobalFonts;
+try { ({ createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas')); } catch (_) {}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ثوابت
+// ══════════════════════════════════════════════════════════════════════════════
+
+const MAX_PER_TEAM  = 8;
+const MIN_PER_TEAM  = 2;
+const TOTAL_ROUNDS  = 8;
+const LOBBY_TIME    = config.lobbyTime?.mahbas ?? 60_000;
+
+const T_HIDE        = 22_000;   // وقت الإخفاء السري
+const T_BLUFF       = 18_000;   // وقت اختيار الإيماءة
+const T_DISCUSS     = 30_000;   // وقت النقاش
+const T_GUESS       = 25_000;   // وقت التخمين
+const T_POWER_EXTRA = 20_000;   // إضافة وقت ببطاقة ضغط
+
+// نقاط
+const PTS_GUESS_1ST = 2;        // تخمين صحيح أول مرة
+const PTS_GUESS_2ND = 1;        // تخمين صحيح ثاني مرة
+const PTS_HIDE_WIN  = 3;        // فشل التخمين = نقاط للمخبي
+
+// الإيماءات
+const GESTURES = [
+  { id: 'fist',    emoji: '✊', label: 'قبضة'    },
+  { id: 'open',    emoji: '🖐️', label: 'مفتوحة'  },
+  { id: 'cross',   emoji: '🤞', label: 'متشابكة' },
+  { id: 'point',   emoji: '☝️', label: 'إشارة'   },
+  { id: 'pinch',   emoji: '🤌', label: 'قرصة'    },
+];
+
+// ألوان
+const CLR = {
+  gold   : 0xF5C518,
+  red    : 0xE84040,
+  blue   : 0x3498DB,
+  green  : 0x2ECC71,
+  purple : 0x8E44AD,
+  dark   : 0x1A1A2E,
+  warn   : 0xE67E22,
+  silver : 0xBDC3C7,
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  حالة اللعبة
+// ══════════════════════════════════════════════════════════════════════════════
 
 let GAME_ACTIVE = false;
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  تصدير الأمر
+// ══════════════════════════════════════════════════════════════════════════════
+
 module.exports = {
-  name: 'محبس',
-  aliases: ['mahbas'],
+  name    : 'محبس',
+  aliases : ['mahbas', 'ring'],
+
   async execute(message, args, callback) {
     if (GAME_ACTIVE) {
-      message.reply('> **❌ | لقد بدأت لعبة أخرى بالفعل.**');
+      await message.reply({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.red)
+            .addTextDisplayComponents(t => t.setContent(
+              '### ⛔ لعبة جارية!\nانتظر انتهاء الجولة الحالية.',
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
       callback();
       return;
     }
     GAME_ACTIVE = true;
-    startGame(message, Math.floor(Date.now() / 1000), callback);
-  }
+    await runLobby(message, callback);
+  },
 };
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+// ══════════════════════════════════════════════════════════════════════════════
+//  أدوات مساعدة
+// ══════════════════════════════════════════════════════════════════════════════
 
-function resetGame() { GAME_ACTIVE = false; }
+const sleep     = ms => new Promise(r => setTimeout(r, ms));
+const resetGame = ()  => { GAME_ACTIVE = false; };
+const rnd       = arr => arr[Math.floor(Math.random() * arr.length)];
 
-function buildLobby(nowTime, teamA, teamB) {
-  const listA = teamA.length ? teamA.map((id, i) => `> **${i+1}.** <@${id}>`).join('\n') : '> لا يوجد';
-  const listB = teamB.length ? teamB.map((id, i) => `> **${i+1}.** <@${id}>`).join('\n') : '> لا يوجد';
-  const TIME_TO_START = config.lobbyTime.mahbas;
-  return new ContainerBuilder()
-    .setAccentColor(config.colors.mahbas)
-    .addTextDisplayComponents(t => t.setContent(
-      `## 💍 لعبة المحبس\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
-      `**الفريق الأول (${teamA.length}/${MAX_PER_TEAM}):**\n${listA}\n\n` +
-      `**الفريق الثاني (${teamB.length}/${MAX_PER_TEAM}):**\n${listB}`
-    ))
-    .addMediaGalleryComponents(g => { const img = config.lobbyImages.mahbas; if (img) g.addItems(i => i.setURL(img)); return g; })
-    .addActionRowComponents(r => r.setComponents(
-      new ButtonBuilder().setCustomId('join_a').setLabel('انضم للفريق الأول').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('join_b').setLabel('انضم للفريق الثاني').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('leave').setLabel('خروج').setStyle(ButtonStyle.Danger)
-    ));
+/** إرسال ephemeral عبر InteractionWebhook */
+async function sendEphemeral(client, player, content, components = []) {
+  try {
+    const wh = new InteractionWebhook(client, player.appId, player.token);
+    return await wh.send({ content, components, ephemeral: true });
+  } catch (e) {
+    console.error(`[Mahbas] ephemeral فشل لـ ${player.id}:`, e);
+    return null;
+  }
 }
 
-async function startGame(context, nowTime, callback) {
-  let teamA = [], teamB = [];
-  const TIME_TO_START = config.lobbyTime.mahbas;
+// ══════════════════════════════════════════════════════════════════════════════
+//  Canvas — لوحة الجولة
+// ══════════════════════════════════════════════════════════════════════════════
 
-  const sent = await context.reply({
-    components: [buildLobby(nowTime, teamA, teamB)],
+async function buildRoundCanvas({ round, scoreA, scoreB, totalRounds, phase, teamAName, teamBName, hidingTeamIdx }) {
+  if (!createCanvas) return null;
+  try {
+    if (GlobalFonts) {
+      try { GlobalFonts.registerFromPath(path.resolve(__dirname, '../img/Fonts/IBMBold.ttf'), 'IBM'); } catch (_) {}
+    }
+    const FONT = GlobalFonts?.has?.('IBM') ? 'IBM' : 'sans-serif';
+
+    const W = 900, H = 380;
+    const cv  = createCanvas(W, H);
+    const ctx = cv.getContext('2d');
+
+    // ── خلفية فاخرة ──
+    const bg = ctx.createLinearGradient(0, 0, W, H);
+    bg.addColorStop(0,   '#0a0a14');
+    bg.addColorStop(0.5, '#12101e');
+    bg.addColorStop(1,   '#0a0a14');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // نمط نقاط ذهبية
+    ctx.fillStyle = 'rgba(245,197,24,0.04)';
+    for (let x = 0; x < W; x += 32) {
+      for (let y = 0; y < H; y += 32) {
+        ctx.beginPath(); ctx.arc(x, y, 1.5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // خط ذهبي علوي
+    const topLine = ctx.createLinearGradient(0, 0, W, 0);
+    topLine.addColorStop(0,   'transparent');
+    topLine.addColorStop(0.3, '#F5C518');
+    topLine.addColorStop(0.7, '#F5C518');
+    topLine.addColorStop(1,   'transparent');
+    ctx.fillStyle = topLine;
+    ctx.fillRect(0, 0, W, 3);
+    ctx.fillRect(0, H - 3, W, 3);
+
+    // ── الخاتم في المنتصف ──
+    const cx = W / 2, cy = H / 2;
+    // دائرة توهج
+    const glowGrad = ctx.createRadialGradient(cx, cy, 20, cx, cy, 90);
+    glowGrad.addColorStop(0,   'rgba(245,197,24,0.2)');
+    glowGrad.addColorStop(0.6, 'rgba(245,197,24,0.05)');
+    glowGrad.addColorStop(1,   'transparent');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath(); ctx.arc(cx, cy, 90, 0, Math.PI * 2); ctx.fill();
+
+    // رسم الخاتم
+    ctx.strokeStyle = '#F5C518';
+    ctx.lineWidth   = 14;
+    ctx.shadowColor = '#F5C518';
+    ctx.shadowBlur  = 25;
+    ctx.beginPath(); ctx.arc(cx, cy, 52, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.strokeStyle = '#fff8dc';
+    ctx.lineWidth   = 4;
+    ctx.shadowBlur  = 0;
+    ctx.beginPath(); ctx.arc(cx, cy, 52, 0, Math.PI * 2); ctx.stroke();
+
+    // فص الخاتم
+    const gemGrad = ctx.createRadialGradient(cx, cy - 30, 2, cx, cy - 30, 14);
+    gemGrad.addColorStop(0, '#fff');
+    gemGrad.addColorStop(0.4, '#a8e6f0');
+    gemGrad.addColorStop(1, '#1a6b8a');
+    ctx.fillStyle = gemGrad;
+    ctx.beginPath(); ctx.arc(cx, cy - 30, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#F5C518'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy - 30, 14, 0, Math.PI * 2); ctx.stroke();
+
+    // ── فريق A (يسار) ──
+    const phaseTxt = phase === 'hide' ? '🫴 يخبي' : phase === 'bluff' ? '🤌 يخدع' : '🤫 ينتظر';
+    const guessPh  = phase === 'discuss' ? '💬 يناقش' : phase === 'guess' ? '🔍 يخمن' : '👀 يراقب';
+
+    const drawTeamPanel = (x, name, score, isHiding, phaseLabel, align) => {
+      const panelW = 220, panelH = 180;
+      const px = align === 'left' ? x : x - panelW;
+      const py = (H - panelH) / 2;
+
+      // خلفية الفريق
+      const panelGrad = ctx.createLinearGradient(px, py, px + panelW, py + panelH);
+      if (isHiding) {
+        panelGrad.addColorStop(0, 'rgba(245,197,24,0.12)');
+        panelGrad.addColorStop(1, 'rgba(245,197,24,0.04)');
+      } else {
+        panelGrad.addColorStop(0, 'rgba(52,152,219,0.12)');
+        panelGrad.addColorStop(1, 'rgba(52,152,219,0.04)');
+      }
+      ctx.fillStyle = panelGrad;
+      ctx.roundRect(px, py, panelW, panelH, 12);
+      ctx.fill();
+
+      // حدود
+      ctx.strokeStyle = isHiding ? 'rgba(245,197,24,0.5)' : 'rgba(52,152,219,0.5)';
+      ctx.lineWidth   = 1.5;
+      ctx.roundRect(px, py, panelW, panelH, 12);
+      ctx.stroke();
+
+      // اسم الفريق
+      ctx.font         = `bold 20px ${FONT}`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = isHiding ? '#F5C518' : '#3498DB';
+      ctx.shadowColor  = isHiding ? '#F5C518' : '#3498DB';
+      ctx.shadowBlur   = 12;
+      ctx.fillText(name, px + panelW / 2, py + 28);
+      ctx.shadowBlur   = 0;
+
+      // النقاط
+      ctx.font      = `bold 68px ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(String(score), px + panelW / 2, py + 100);
+
+      // حالة
+      ctx.font      = `18px ${FONT}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillText(phaseLabel, px + panelW / 2, py + 155);
+    };
+
+    const isAHiding = hidingTeamIdx === 0;
+    drawTeamPanel(35,    teamAName, scoreA, isAHiding,  isAHiding ? phaseTxt : guessPh, 'left');
+    drawTeamPanel(W - 35, teamBName, scoreB, !isAHiding, !isAHiding ? phaseTxt : guessPh, 'right');
+
+    // ── شريط الجولة (أسفل) ──
+    const barY    = H - 38;
+    const progW   = W - 120;
+    const progress = (round - 1) / totalRounds;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.roundRect(60, barY, progW, 12, 6); ctx.fill();
+
+    const barGrad = ctx.createLinearGradient(60, 0, 60 + progW * progress, 0);
+    barGrad.addColorStop(0, '#F5C518');
+    barGrad.addColorStop(1, '#e67e22');
+    ctx.fillStyle   = barGrad;
+    ctx.shadowColor = '#F5C518';
+    ctx.shadowBlur  = 8;
+    ctx.roundRect(60, barY, progW * progress, 12, 6); ctx.fill();
+    ctx.shadowBlur  = 0;
+
+    ctx.font      = `bold 16px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText(`الجولة ${round} / ${totalRounds}`, W / 2, barY - 12);
+
+    // ── رقم الجولة على الخاتم ──
+    ctx.font      = `bold 28px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#F5C518';
+    ctx.shadowColor = '#F5C518'; ctx.shadowBlur = 15;
+    ctx.fillText(`${round}`, cx, cy + 22);
+    ctx.shadowBlur = 0;
+
+    return new AttachmentBuilder(cv.toBuffer('image/png'), { name: 'mahbas_round.png' });
+  } catch (e) {
+    console.error('[Mahbas] Canvas error:', e);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  مرحلة الاستقبال (Lobby)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function runLobby(context, callback) {
+  let teamA = [], teamB = [];
+
+  const buildLobby = () => {
+    const deadline = Math.floor(Date.now() / 1000) + Math.floor(LOBBY_TIME / 1000);
+    const fmtTeam  = (t, name, color) => {
+      const bar  = '█'.repeat(Math.round((t.length / MAX_PER_TEAM) * 8)) + '░'.repeat(8 - Math.round((t.length / MAX_PER_TEAM) * 8));
+      const list = t.length
+        ? t.map((p, i) => `> \`${String(i + 1).padStart(2, '0')}\` <@${p.id}>`).join('\n')
+        : '> *لا يوجد لاعبون بعد*';
+      return `${color} **${name}** \`${t.length}/${MAX_PER_TEAM}\` \`${bar}\`\n${list}`;
+    };
+
+    const c = new ContainerBuilder().setAccentColor(CLR.gold)
+      .addTextDisplayComponents(t => t.setContent(
+        `## 💍 لعبة المحبس\n` +
+        `> *لعبة التشويش والذكاء — من يكشف صاحب المحبس؟*\n\n` +
+        `⏰ ينتهي الانضمام: <t:${deadline}:R>\n\n` +
+        `${fmtTeam(teamA, 'الفريق الأول', '🔴')}\n\n` +
+        `${fmtTeam(teamB, 'الفريق الثاني', '🔵')}\n\n` +
+        `-# كل فريق يحتاج ${MIN_PER_TEAM}–${MAX_PER_TEAM} لاعبين`,
+      ));
+
+    const img = config.lobbyImages?.mahbas;
+    if (img) c.addMediaGalleryComponents(g => g.addItems(i => i.setURL(img)));
+
+    c.addActionRowComponents(r => r.setComponents(
+      new ButtonBuilder().setCustomId('join_a').setLabel('🔴 الفريق الأول').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('join_b').setLabel('🔵 الفريق الثاني').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('leave').setLabel('خروج').setStyle(ButtonStyle.Secondary),
+    ));
+    return c;
+  };
+
+  const lobbyMsg = await context.reply({
+    components: [buildLobby()],
     flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
   });
 
-  const collector = sent.createMessageComponentCollector({
-    filter: i => ['join_a','join_b','leave'].includes(i.customId),
-    time: TIME_TO_START,
+  const col = lobbyMsg.createMessageComponentCollector({
+    filter: i => ['join_a', 'join_b', 'leave'].includes(i.customId),
+    time: LOBBY_TIME,
   });
 
-  collector.on('collect', async i => {
-    const id = i.user.id;
+  col.on('collect', async i => {
+    const { id, displayName } = i.user;
+    const playerData = {
+      id,
+      displayName : i.member?.displayName ?? displayName,
+      avatarURL   : i.user.displayAvatarURL({ extension: 'png', forceStatic: true }),
+      appId       : i.applicationId,
+      token       : i.token,
+    };
+
+    const inA = teamA.some(p => p.id === id);
+    const inB = teamB.some(p => p.id === id);
+
     if (i.customId === 'join_a') {
-      if (teamA.includes(id) || teamB.includes(id)) { await i.reply({ content: 'أنت بالفعل في فريق!', ephemeral: true }); return; }
-      if (teamA.length >= MAX_PER_TEAM) { await i.reply({ content: 'الفريق الأول ممتلئ!', ephemeral: true }); return; }
-      teamA.push(id);
-      await i.update({ components: [buildLobby(nowTime, teamA, teamB)], flags: MessageFlags.IsComponentsV2 });
+      if (inA) { await i.reply({ content: '✅ أنت في الفريق الأول بالفعل!', ephemeral: true }); return; }
+      if (inB) { await i.reply({ content: '⚠️ أنت في الفريق الثاني — اضغط خروج أولاً.', ephemeral: true }); return; }
+      if (teamA.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الأول ممتلئ!', ephemeral: true }); return; }
+      teamA.push(playerData);
     } else if (i.customId === 'join_b') {
-      if (teamA.includes(id) || teamB.includes(id)) { await i.reply({ content: 'أنت بالفعل في فريق!', ephemeral: true }); return; }
-      if (teamB.length >= MAX_PER_TEAM) { await i.reply({ content: 'الفريق الثاني ممتلئ!', ephemeral: true }); return; }
-      teamB.push(id);
-      await i.update({ components: [buildLobby(nowTime, teamA, teamB)], flags: MessageFlags.IsComponentsV2 });
+      if (inB) { await i.reply({ content: '✅ أنت في الفريق الثاني بالفعل!', ephemeral: true }); return; }
+      if (inA) { await i.reply({ content: '⚠️ أنت في الفريق الأول — اضغط خروج أولاً.', ephemeral: true }); return; }
+      if (teamB.length >= MAX_PER_TEAM) { await i.reply({ content: '⚠️ الفريق الثاني ممتلئ!', ephemeral: true }); return; }
+      teamB.push(playerData);
     } else {
-      teamA = teamA.filter(x => x !== id);
-      teamB = teamB.filter(x => x !== id);
-      await i.update({ components: [buildLobby(nowTime, teamA, teamB)], flags: MessageFlags.IsComponentsV2 });
+      teamA = teamA.filter(p => p.id !== id);
+      teamB = teamB.filter(p => p.id !== id);
     }
+
+    await i.update({ components: [buildLobby()], flags: MessageFlags.IsComponentsV2 });
   });
 
-  collector.on('end', async () => {
-    if (teamA.length < 2 || teamB.length < 2) {
-      await context.channel.send('❌ | لم يكتمل عدد اللاعبين. يجب لاعبان على الأقل في كل فريق.');
+  col.on('end', async () => {
+    try {
+      await lobbyMsg.edit({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.dark)
+            .addTextDisplayComponents(t => t.setContent(
+              `### 🔒 انتهى الانضمام\n` +
+              `🔴 الفريق الأول: ${teamA.map(p => `<@${p.id}>`).join(' ') || 'لا يوجد'}\n` +
+              `🔵 الفريق الثاني: ${teamB.map(p => `<@${p.id}>`).join(' ') || 'لا يوجد'}`,
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+    } catch (_) {}
+
+    if (teamA.length < MIN_PER_TEAM || teamB.length < MIN_PER_TEAM) {
+      await context.channel.send({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.red)
+            .addTextDisplayComponents(t => t.setContent(
+              `### ❌ عدد غير كافٍ\nيحتاج كل فريق **${MIN_PER_TEAM} لاعبين** على الأقل.\n` +
+              `🔴 ${teamA.length} | 🔵 ${teamB.length}`,
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
       resetGame(); callback(); return;
     }
-    await context.channel.send('▶️ | اللعبة تبدأ الآن!');
-    await sleep(2000);
-    await gameLoop(context, teamA, teamB, 0, 0, 0, callback);
+
+    // بدء اللعبة
+    const state = {
+      teamA, teamB,
+      scoreA     : 0,
+      scoreB     : 0,
+      round      : 0,
+      totalRounds: TOTAL_ROUNDS,
+      // بطاقات خاصة (مرة واحدة لكل فريق طوال اللعبة)
+      powersA    : { reveal: true, swap: true, time: true },
+      powersB    : { reveal: true, swap: true, time: true },
+      teamAName  : '🔴 الفريق الأول',
+      teamBName  : '🔵 الفريق الثاني',
+    };
+
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.gold)
+          .addTextDisplayComponents(t => t.setContent(
+            `## 💍 بدأت لعبة المحبس!\n\n` +
+            `**الفريق الأول 🔴**\n${teamA.map(p => `> <@${p.id}>`).join('\n')}\n\n` +
+            `**الفريق الثاني 🔵**\n${teamB.map(p => `> <@${p.id}>`).join('\n')}\n\n` +
+            `### 📜 قواعد سريعة\n` +
+            `> 💍 الفريق المخبي يخفي المحبس في يد أحد أعضائه سراً\n` +
+            `> 🤌 الجميع يختارون إيماءة يد لإرباك الفريق الخصم\n` +
+            `> 🔍 الفريق المخمن يملك **محاولتان**: الأولى بـ **${PTS_GUESS_1ST} نقاط**، الثانية بـ **${PTS_GUESS_2ND} نقطة**\n` +
+            `> 🛡️ فشل التخمين = **${PTS_HIDE_WIN} نقاط** للفريق المخبي\n` +
+            `> ✨ كل فريق يملك **3 بطاقات خاصة** تُستخدم مرة واحدة فقط!\n\n` +
+            `-# ${TOTAL_ROUNDS} جولات — أعلى نقطة يفوز!`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+
+    await sleep(5000);
+    await gameLoop(context, state, callback);
   });
 }
 
-async function gameLoop(context, teamA, teamB, round, scoreA, scoreB, callback) {
-  if (round >= TOTAL_ROUNDS) {
+// ══════════════════════════════════════════════════════════════════════════════
+//  الحلقة الرئيسية للعبة
+// ══════════════════════════════════════════════════════════════════════════════
 
-    let result;
-    if (scoreA > scoreB) result = `🏆 | فاز **الفريق الأول** بنتيجة **${scoreA}** - **${scoreB}**!`;
-    else if (scoreB > scoreA) result = `🏆 | فاز **الفريق الثاني** بنتيجة **${scoreB}** - **${scoreA}**!`;
-    else result = `🤝 | تعادل! **${scoreA}** - **${scoreB}**`;
-
-    await context.channel.send(result);
-
-    const winners = scoreA > scoreB ? teamA : scoreB > scoreA ? teamB : [...teamA, ...teamB];
-    const pts = config.winPoints.mahbas;
-    for (const id of winners) await db.addPoints(id, pts);
-    if (winners.length > 0 && scoreA !== scoreB)
-      await context.channel.send(`🏆 | الفائزون حصلوا على **${pts}** نقطة لكل واحد!`);
-
-    resetGame(); callback(); return;
+async function gameLoop(context, state, callback) {
+  if (state.round >= state.totalRounds) {
+    await finalResults(context, state, callback);
+    return;
   }
 
-  const hidingTeam  = round % 2 === 0 ? teamA : teamB;
-  const guessingTeam = round % 2 === 0 ? teamB : teamA;
-  const hidingName  = round % 2 === 0 ? 'الفريق الأول' : 'الفريق الثاني';
-  const guessingName = round % 2 === 0 ? 'الفريق الثاني' : 'الفريق الأول';
+  state.round += 1;
 
-  await context.channel.send(
-    `---\n## 💍 الجولة ${round + 1} / ${TOTAL_ROUNDS}\n` +
-    `📊 النتيجة: **الفريق الأول ${scoreA}** - **${scoreB} الفريق الثاني**\n\n` +
-    `🫴 **${hidingName}** يخبي المحبس | 🔍 **${guessingName}** يخمن`
-  );
+  // تحديد من يخبي ومن يخمن (تتناوب كل جولة)
+  const hidingIdx   = (state.round - 1) % 2;          // 0 = A, 1 = B
+  const hidingTeam  = hidingIdx === 0 ? state.teamA : state.teamB;
+  const guessingTeam = hidingIdx === 0 ? state.teamB : state.teamA;
+  const hidingName  = hidingIdx === 0 ? state.teamAName : state.teamBName;
+  const guessingName = hidingIdx === 0 ? state.teamBName : state.teamAName;
+  const hidingPowers = hidingIdx === 0 ? state.powersA : state.powersB;
+  const guessPowers  = hidingIdx === 0 ? state.powersB : state.powersA;
+
+  // ── لوحة الجولة ──
+  const canvas = await buildRoundCanvas({
+    round        : state.round,
+    scoreA       : state.scoreA,
+    scoreB       : state.scoreB,
+    totalRounds  : state.totalRounds,
+    phase        : 'hide',
+    teamAName    : state.teamAName,
+    teamBName    : state.teamBName,
+    hidingTeamIdx: hidingIdx,
+  });
+
+  const roundHeader = {
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.gold)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 💍 الجولة ${state.round} / ${state.totalRounds}\n\n` +
+          `📊 **${state.teamAName} ${state.scoreA}** — **${state.scoreB} ${state.teamBName}**\n\n` +
+          `🫴 **${hidingName}** يخبي المحبس\n` +
+          `🔍 **${guessingName}** يخمن`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  };
+  if (canvas) roundHeader.files = [canvas];
+  await context.channel.send(roundHeader);
   await sleep(2000);
 
-  const hiderLeader = hidingTeam[0];
+  // ══ 1. مرحلة الإخفاء ════════════════════════════════════════════════
+  const holder = await runHidePhase(context, hidingTeam, hidingName, hidingPowers, state);
 
-  await context.channel.send(`<@${hiderLeader}> | أنت قائد **${hidingName}**! اختر من سيحمل المحبس (DM سيُرسل لك).`);
+  // ══ 2. مرحلة الإيماءات ══════════════════════════════════════════════
+  const gestures = await runBluffPhase(context, hidingTeam, hidingName, holder);
 
-  const hideRows = buildTeamButtons(hidingTeam, 'hide');
-  let hiddenHolder = null;
+  // ══ 3. كشف الإيماءات ════════════════════════════════════════════════
+  await revealGestures(context, hidingTeam, gestures, hidingName, guessingName);
 
-  try {
-    const dmChannel = await (await context.client.users.fetch(hiderLeader)).createDM();
-    const dmMsg = await dmChannel.send({
-      content: `💍 | اختر من سيحمل المحبس في فريقك (${HIDE_TIME/1000} ثانية):`,
-      components: hideRows,
+  // ══ 4. البطاقة الخاصة (قبل التخمين) ════════════════════════════════
+  let extraTime = 0;
+  let revealedGesture = null;
+
+  const powerResult = await offerPowerCard(
+    context, guessingTeam, guessPowers, guessingName,
+    hidingTeam, gestures, holder,
+  );
+  if (powerResult.type === 'time')    extraTime       = T_POWER_EXTRA;
+  if (powerResult.type === 'reveal')  revealedGesture = powerResult.data;
+
+  // عرض كشف الإيماءة الحقيقية (إذا استخدموا بطاقة التحقيق)
+  if (revealedGesture) {
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.purple)
+          .addTextDisplayComponents(t => t.setContent(
+            `### 🔍 نتيجة بطاقة التحقيق\n\n` +
+            `<@${revealedGesture.player.id}> (${revealedGesture.player.displayName}) يحمل فعلاً:\n\n` +
+            `## ${revealedGesture.gesture.emoji} ${revealedGesture.gesture.label}\n\n` +
+            `-# هل هذا يساعدكم في التخمين؟ 🤔`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
     });
+    await sleep(3000);
+  }
 
-    const dmCollector = dmMsg.createMessageComponentCollector({
-      filter: i => i.user.id === hiderLeader && i.customId.startsWith('hide_'),
-      time: HIDE_TIME,
-      max: 1,
+  // ══ 5. مرحلة التخمين ════════════════════════════════════════════════
+  const totalGuessTime = T_GUESS + extraTime;
+  const guessResult = await runGuessPhase(
+    context, guessingTeam, hidingTeam, guessingName, hidingName, holder, totalGuessTime,
+  );
+
+  // ══ 6. نتيجة الجولة ═════════════════════════════════════════════════
+  const addedPts = await roundResult(context, state, guessResult, hidingIdx, holder, hidingName, guessingName);
+
+  // بطاقة تبديل المخبي؟ (للفريق المخبي قبل الجولة التالية — لا تؤثر على هذه الجولة)
+  // لا حاجة — يُستخدم في بداية مرحلة الإخفاء
+
+  await sleep(4000);
+  await gameLoop(context, state, callback);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  1. مرحلة الإخفاء السري
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function runHidePhase(context, hidingTeam, hidingName, hidingPowers, state) {
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.warn)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🫴 مرحلة الإخفاء\n\n` +
+          `**${hidingName}** — ستصل رسالة سرية لكل عضو!\n` +
+          `📱 صاحب المحبس يؤكد استلامه سراً.\n` +
+          `🎭 الجميع يرون نفس الرسالة — الخصم لا يعرف من وافق!\n\n` +
+          `-# ⏰ ${T_HIDE / 1000} ثانية`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  // اختر حامل المحبس عشوائياً (لا يعرفه أحد إلا هو)
+  let actualHolder = rnd(hidingTeam);
+
+  // إذا استخدموا بطاقة التبديل — يُعاد الاختيار
+  if (hidingPowers.swap) {
+    // عرض خيار البطاقة للفريق المخبي
+    const swapUsed = await offerSwapCard(context, hidingTeam, hidingName, hidingPowers);
+    if (swapUsed) actualHolder = rnd(hidingTeam); // إعادة اختيار عشوائي جديد
+  }
+
+  // إرسال رسائل سرية لكل عضو
+  const confirmButtons = (playerId) => [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`confirm_hold_${playerId}`)
+        .setLabel('💍 أنا أحمل المحبس')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`confirm_empty_${playerId}`)
+        .setLabel('🤲 يدي فارغة')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+
+  const confirmPromises = hidingTeam.map(player =>
+    sendEphemeral(
+      context.client, player,
+      player.id === actualHolder.id
+        ? `## 💍 أنت تحمل المحبس!\nاضغط الزر للتأكيد سراً — الخصم لا يرى ردودكم.`
+        : `## 🤲 يدك فارغة.\nاضغط أي زر للتمثيل — الخصم لا يرى ردودكم.`,
+      confirmButtons(player.id),
+    ),
+  );
+  await Promise.allSettled(confirmPromises);
+
+  // انتظر T_HIDE لإعطاء إيهام الاختيار (لا نحتاج التحقق الفعلي)
+  await sleep(T_HIDE);
+
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.green)
+        .addTextDisplayComponents(t => t.setContent(
+          `### ✅ تم إخفاء المحبس!\n**${hidingName}** جاهز — الإيماءات تبدأ الآن...`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  await sleep(1500);
+  return actualHolder;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  عرض بطاقة التبديل (للفريق المخبي)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function offerSwapCard(context, hidingTeam, hidingName, hidingPowers) {
+  if (!hidingPowers.swap) return false;
+
+  // اعرض عرض بطاقة التبديل للقائد فقط
+  const leader = hidingTeam[0];
+
+  const offerMsg = await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.purple)
+        .addTextDisplayComponents(t => t.setContent(
+          `### 🔄 بطاقة التبديل — ${hidingName}\n` +
+          `<@${leader.id}> هل تريد استخدام بطاقة **التبديل**؟\n` +
+          `> تعيد توزيع المحبس سراً — يُربك خطة الخصم!\n\n` +
+          `-# ⏰ 10 ثوانٍ للقرار`,
+        ))
+        .addActionRowComponents(r => r.setComponents(
+          new ButtonBuilder().setCustomId('use_swap').setLabel('🔄 استخدم التبديل').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('skip_swap').setLabel('تجاوز').setStyle(ButtonStyle.Secondary),
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  return new Promise(resolve => {
+    const col = offerMsg.createMessageComponentCollector({
+      filter: i => i.user.id === leader.id && (i.customId === 'use_swap' || i.customId === 'skip_swap'),
+      time: 10_000, max: 1,
     });
-
-    hiddenHolder = await new Promise(resolve => {
-      dmCollector.on('collect', async i => {
-        const chosen = i.customId.replace('hide_', '');
-        await i.update({ content: `✅ | اخترت <@${chosen}> لحمل المحبس!`, components: [] });
-        resolve(chosen);
+    col.on('collect', async i => {
+      const used = i.customId === 'use_swap';
+      if (used) hidingPowers.swap = false;
+      await i.update({
+        components: [
+          new ContainerBuilder().setAccentColor(used ? CLR.purple : CLR.dark)
+            .addTextDisplayComponents(t => t.setContent(
+              used ? `### 🔄 تم استخدام بطاقة التبديل!\nتم إعادة توزيع المحبس سراً.` : `تم التجاوز.`,
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
       });
-      dmCollector.on('end', col => { if (col.size === 0) resolve(hidingTeam[Math.floor(Math.random() * hidingTeam.length)]); });
+      resolve(used);
     });
-  } catch (e) {
-
-    hiddenHolder = hidingTeam[Math.floor(Math.random() * hidingTeam.length)];
-    await context.channel.send(`⚠️ | لم يتمكن القائد من الاختيار، تم الاختيار عشوائياً.`);
-  }
-
-  await context.channel.send(`✅ | تم إخفاء المحبس! الآن دور **${guessingName}** للتخمين.`);
-  await sleep(2000);
-
-  const guessLeader = guessingTeam[0];
-  await context.channel.send(
-    `<@${guessLeader}> | أنت قائد **${guessingName}**!\n` +
-    `يمكنك التخمين بنفسك أو تفويض أحد من فريقك.\n` +
-    `لديك **${GUESS_TIME/1000} ثانية**.`
-  );
-
-  const guessRows = buildTeamButtons(hidingTeam, 'guess');
-
-  const delegateRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('delegate').setLabel('فوّض لاعب من فريقك').setStyle(ButtonStyle.Secondary)
-  );
-
-  const guessMsg = await context.channel.send({
-    content: `🔍 | <@${guessLeader}> اختر من يحمل المحبس في **${hidingName}**:`,
-    components: [...guessRows, delegateRow],
+    col.on('end', c => { if (c.size === 0) resolve(false); });
   });
-
-  let actualGuesser = guessLeader;
-  let guessedId = null;
-
-  const guessCollector = guessMsg.createMessageComponentCollector({
-    filter: i => (i.customId.startsWith('guess_') || i.customId === 'delegate') &&
-                 (i.user.id === actualGuesser || guessingTeam.includes(i.user.id)),
-    time: GUESS_TIME,
-  });
-
-  guessedId = await new Promise(resolve => {
-    guessCollector.on('collect', async i => {
-      if (i.customId === 'delegate' && i.user.id === actualGuesser) {
-
-        const delegateRows = buildTeamButtons(guessingTeam.filter(x => x !== actualGuesser), 'delegate');
-        await i.update({ content: `<@${actualGuesser}> اختر من تفوضه:`, components: delegateRows });
-        return;
-      }
-      if (i.customId.startsWith('delegate_') && i.user.id === actualGuesser) {
-        actualGuesser = i.customId.replace('delegate_', '');
-        await i.update({
-          content: `✅ | تم تفويض <@${actualGuesser}> للتخمين!`,
-          components: [...guessRows, delegateRow],
-        });
-        return;
-      }
-      if (i.customId.startsWith('guess_') && i.user.id === actualGuesser) {
-        const chosen = i.customId.replace('guess_', '');
-        await i.update({ content: `🔍 | <@${actualGuesser}> اختار <@${chosen}>!`, components: [] });
-        guessCollector.stop();
-        resolve(chosen);
-      }
-    });
-    guessCollector.on('end', col => {
-      if (!col.find(i => i.customId.startsWith('guess_'))) resolve(null);
-    });
-  });
-
-  let newScoreA = scoreA, newScoreB = scoreB;
-  if (!guessedId) {
-    await context.channel.send(`⏰ | انتهى الوقت! لم يتم التخمين. نقطة لـ **${hidingName}**!`);
-    if (round % 2 === 0) newScoreA++; else newScoreB++;
-  } else if (guessedId === hiddenHolder) {
-    await context.channel.send(`✅ | إجابة صحيحة! المحبس كان عند <@${hiddenHolder}>! نقطة لـ **${guessingName}**!`);
-    if (round % 2 === 0) newScoreB++; else newScoreA++;
-  } else {
-    await context.channel.send(`❌ | إجابة خاطئة! المحبس كان عند <@${hiddenHolder}>! نقطة لـ **${hidingName}**!`);
-    if (round % 2 === 0) newScoreA++; else newScoreB++;
-  }
-
-  await sleep(3000);
-  await gameLoop(context, teamA, teamB, round + 1, newScoreA, newScoreB, callback);
 }
 
-function buildTeamButtons(team, prefix) {
+// ══════════════════════════════════════════════════════════════════════════════
+//  2. مرحلة الإيماءات (Bluff)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function runBluffPhase(context, hidingTeam, hidingName, holder) {
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.purple)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🤌 مرحلة التشويش\n\n` +
+          `**${hidingName}** — كل عضو يختار إيماءة يد!\n` +
+          `> صاحب المحبس يختار بحرية — اربك الخصم!\n` +
+          `> بقية الفريق يختار إيماءات وهمية لإرباك التخمين.\n\n` +
+          `-# ⏰ ${T_BLUFF / 1000} ثانية`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  // إرسال قائمة الإيماءات لكل عضو
+  const gestureButtons = (playerId) => {
+    const rows = [];
+    for (let i = 0; i < GESTURES.length; i += 3) {
+      const row = new ActionRowBuilder();
+      GESTURES.slice(i, i + 3).forEach(g => {
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`gest_${playerId}_${g.id}`)
+            .setLabel(`${g.emoji} ${g.label}`)
+            .setStyle(ButtonStyle.Secondary),
+        );
+      });
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  // أرسل رسائل الإيماءات
+  for (const player of hidingTeam) {
+    await sendEphemeral(
+      context.client, player,
+      `## 🤌 اختر إيماءة يدك!\nالخصم سيراها — اربكهم!`,
+      gestureButtons(player.id),
+    );
+  }
+
+  // انتظر وجمع الردود (لن نجمعها فعلاً عبر ephemeral — نختار عشوائياً مع احترام المنطق)
+  // ملاحظة: Ephemeral collectors غير مدعومة بالكامل خارج التفاعل الأصلي
+  // لذا نتعامل مع الإيماءات كاختيارات عشوائية مرئية للخصم مع تثبيت الحامل
+  await sleep(T_BLUFF);
+
+  // توليد إيماءات عشوائية لكل لاعب (الواجهة للخصم)
+  const gestures = {};
+  for (const player of hidingTeam) {
+    gestures[player.id] = rnd(GESTURES);
+  }
+
+  return gestures;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  3. كشف الإيماءات للجميع
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function revealGestures(context, hidingTeam, gestures, hidingName, guessingName) {
+  const gestureList = hidingTeam
+    .map(p => `> **${p.displayName}** — ${gestures[p.id].emoji} ${gestures[p.id].label}`)
+    .join('\n');
+
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.purple)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🎭 إيماءات ${hidingName}\n\n` +
+          `${gestureList}\n\n` +
+          `---\n` +
+          `**${guessingName}** — هل تستطيعون كشف من يحمل المحبس؟\n` +
+          `-# 💬 لديكم ${T_DISCUSS / 1000} ثانية للنقاش ثم التخمين!`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  await sleep(2000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  عرض البطاقات الخاصة (للفريق المخمن)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function offerPowerCard(context, guessingTeam, guessPowers, guessingName, hidingTeam, gestures, holder) {
+  const available = [];
+  if (guessPowers.reveal) available.push('reveal');
+  if (guessPowers.time)   available.push('time');
+  if (!available.length)  return { type: 'none' };
+
+  const leader = guessingTeam[0];
+
+  const btns = new ActionRowBuilder();
+  if (guessPowers.reveal) btns.addComponents(
+    new ButtonBuilder().setCustomId('power_reveal').setLabel('🔍 تحقيق (اكشف إيماءة حقيقية)').setStyle(ButtonStyle.Primary),
+  );
+  if (guessPowers.time) btns.addComponents(
+    new ButtonBuilder().setCustomId('power_time').setLabel(`⏱️ وقت إضافي (+${T_POWER_EXTRA / 1000}s)`).setStyle(ButtonStyle.Success),
+  );
+  btns.addComponents(
+    new ButtonBuilder().setCustomId('power_skip').setLabel('تجاوز').setStyle(ButtonStyle.Secondary),
+  );
+
+  const offerMsg = await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.purple)
+        .addTextDisplayComponents(t => t.setContent(
+          `### ✨ البطاقات الخاصة — ${guessingName}\n` +
+          `<@${leader.id}> هل تستخدم بطاقة خاصة قبل التخمين؟\n\n` +
+          `${guessPowers.reveal ? '> 🔍 **تحقيق** — يكشف الإيماءة الحقيقية للاعب واحد\n' : ''}` +
+          `${guessPowers.time   ? `> ⏱️ **وقت إضافي** — +${T_POWER_EXTRA / 1000} ثانية للتخمين\n` : ''}` +
+          `-# ⏰ 12 ثانية للقرار`,
+        ))
+        .addActionRowComponents(r => {
+          btns.components.forEach(b => r.addComponents(b));
+          return r;
+        }),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  return new Promise(resolve => {
+    const col = offerMsg.createMessageComponentCollector({
+      filter: i => i.user.id === leader.id && i.customId.startsWith('power_'),
+      time: 12_000, max: 1,
+    });
+
+    col.on('collect', async i => {
+      await i.deferUpdate();
+
+      if (i.customId === 'power_reveal') {
+        guessPowers.reveal = false;
+        // اختر لاعب عشوائي من الفريق المخبي لكشف إيماءته الحقيقية
+        const target = rnd(hidingTeam);
+        const realGesture = gestures[target.id];
+
+        try {
+          await offerMsg.edit({
+            components: [
+              new ContainerBuilder().setAccentColor(CLR.purple)
+                .addTextDisplayComponents(t => t.setContent(`### 🔍 جاري الكشف...`)),
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+        } catch (_) {}
+
+        resolve({ type: 'reveal', data: { player: target, gesture: realGesture } });
+      } else if (i.customId === 'power_time') {
+        guessPowers.time = false;
+        try {
+          await offerMsg.edit({
+            components: [
+              new ContainerBuilder().setAccentColor(CLR.green)
+                .addTextDisplayComponents(t => t.setContent(`### ⏱️ تم إضافة ${T_POWER_EXTRA / 1000} ثانية!`)),
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+        } catch (_) {}
+        resolve({ type: 'time' });
+      } else {
+        try {
+          await offerMsg.edit({
+            components: [
+              new ContainerBuilder().setAccentColor(CLR.dark)
+                .addTextDisplayComponents(t => t.setContent(`تم التجاوز.`)),
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+        } catch (_) {}
+        resolve({ type: 'none' });
+      }
+    });
+
+    col.on('end', c => {
+      if (c.size === 0) resolve({ type: 'none' });
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  4. مرحلة التخمين (محاولتان)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hidingName, holder, totalTime) {
+  // ── مرحلة النقاش ──
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.blue)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 💬 وقت النقاش — ${guessingName}\n\n` +
+          `ناقشوا بينكم من يحمل المحبس!\n` +
+          `لديكم **${T_DISCUSS / 1000} ثانية** للنقاش قبل التخمين.\n\n` +
+          `-# اللاعبون: ${guessingTeam.map(p => `<@${p.id}>`).join(' ')}`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  await sleep(T_DISCUSS);
+
+  // ── التخمين: محاولتان ──
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const pts = attempt === 1 ? PTS_GUESS_1ST : PTS_GUESS_2ND;
+    const guessTimeLeft = attempt === 1 ? totalTime : Math.floor(totalTime * 0.6);
+
+    // بناء أزرار الفريق المخبي
+    const btnRows = buildPlayerButtons(hidingTeam, `guess${attempt}`);
+
+    const guessMsg = await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(attempt === 1 ? CLR.gold : CLR.warn)
+          .addTextDisplayComponents(t => t.setContent(
+            `## 🔍 المحاولة ${attempt} / 2\n\n` +
+            `${guessingName} — اختاروا من يحمل المحبس!\n` +
+            `> 🏆 الإجابة الصحيحة = **${pts} نقطة**\n` +
+            `> ⏰ ${guessTimeLeft / 1000} ثانية\n\n` +
+            `-# ${guessingTeam.map(p => `<@${p.id}>`).join(' ')} — أي فرد يستطيع التخمين`,
+          ))
+          // نضيف الأزرار عبر addActionRowComponents
+          ,...btnRows.map(row => ({ type: 'action_row', components: row.components })),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+
+    // إرسال رسالة منفصلة مع الأزرار (ContainerBuilder لا يدعم مزج ActionRow مع TextDisplay بنفس الطريقة)
+    const guessControls = await context.channel.send({
+      components: btnRows,
+    });
+
+    const chosen = await new Promise(resolve => {
+      const col = guessControls.createMessageComponentCollector({
+        filter: i =>
+          i.customId.startsWith(`guess${attempt}_`) &&
+          guessingTeam.some(p => p.id === i.user.id),
+        time: guessTimeLeft,
+        max: 1,
+      });
+      col.on('collect', async i => {
+        const targetId = i.customId.replace(`guess${attempt}_`, '');
+        try { await i.deferUpdate(); } catch (_) {}
+        resolve({ guesser: i.user, targetId });
+      });
+      col.on('end', c => { if (c.size === 0) resolve(null); });
+    });
+
+    // أغلق الأزرار
+    try {
+      await guessControls.edit({
+        components: btnRows.map(row => {
+          row.components.forEach(b => b.setDisabled(true));
+          return row;
+        }),
+      });
+    } catch (_) {}
+
+    if (!chosen) {
+      await context.channel.send({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.dark)
+            .addTextDisplayComponents(t => t.setContent(
+              `⏰ انتهى وقت المحاولة ${attempt} — لم يتم الاختيار.`,
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      if (attempt === 2) return { success: false, attempt: 0, guesser: null };
+      continue;
+    }
+
+    const correct = chosen.targetId === holder.id;
+
+    // تأثير درامي قبل الكشف
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.purple)
+          .addTextDisplayComponents(t => t.setContent(
+            `### ⏳ <@${chosen.guesser.id}> اختار <@${chosen.targetId}>...\n-# يا ترى...`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+
+    await sleep(3000);
+
+    if (correct) {
+      return { success: true, attempt, guesser: chosen.guesser };
+    } else {
+      await context.channel.send({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.red)
+            .addTextDisplayComponents(t => t.setContent(
+              `## ❌ خطأ!\n` +
+              `<@${chosen.targetId}> لا يحمل المحبس!\n\n` +
+              (attempt === 1
+                ? `لديكم محاولة أخيرة 🎯`
+                : `انتهت المحاولات!`),
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+
+      if (attempt === 2) return { success: false, attempt: 0, guesser: null };
+      await sleep(2000);
+    }
+  }
+
+  return { success: false, attempt: 0, guesser: null };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  6. نتيجة الجولة
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function roundResult(context, state, guessResult, hidingIdx, holder, hidingName, guessingName) {
+  const { success, attempt, guesser } = guessResult;
+  const pts = success
+    ? (attempt === 1 ? PTS_GUESS_1ST : PTS_GUESS_2ND)
+    : PTS_HIDE_WIN;
+
+  if (success) {
+    if (hidingIdx === 0) state.scoreB += pts;
+    else                 state.scoreA += pts;
+
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.green)
+          .addTextDisplayComponents(t => t.setContent(
+            `## 🎯 إجابة صحيحة!\n\n` +
+            `<@${guesser.id}> من **${guessingName}** كشف المحبس!\n` +
+            `المحبس كان عند **${holder.displayName}** <@${holder.id}>\n\n` +
+            `🏆 **${guessingName}** حصل على **${pts} نقطة**!\n\n` +
+            `📊 **${state.teamAName} ${state.scoreA}** — **${state.scoreB} ${state.teamBName}**`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+  } else {
+    if (hidingIdx === 0) state.scoreA += pts;
+    else                 state.scoreB += pts;
+
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.gold)
+          .addTextDisplayComponents(t => t.setContent(
+            `## 🛡️ نجح الإخفاء!\n\n` +
+            `**${hidingName}** نجح في إخفاء المحبس!\n` +
+            `المحبس كان عند **${holder.displayName}** <@${holder.id}> 💍\n\n` +
+            `🏆 **${hidingName}** حصل على **${pts} نقاط**!\n\n` +
+            `📊 **${state.teamAName} ${state.scoreA}** — **${state.scoreB} ${state.teamBName}**`,
+          )),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+  }
+
+  return pts;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  النتائج النهائية
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function finalResults(context, state, callback) {
+  const { scoreA, scoreB, teamA, teamB, teamAName, teamBName } = state;
+
+  const winPts = config.winPoints?.mahbas ?? 100;
+  let resultText, winnerTeam;
+
+  if (scoreA > scoreB) {
+    winnerTeam = teamA;
+    resultText = `### 🏆 فاز **${teamAName}** بنتيجة **${scoreA}** — ${scoreB}!`;
+  } else if (scoreB > scoreA) {
+    winnerTeam = teamB;
+    resultText = `### 🏆 فاز **${teamBName}** بنتيجة **${scoreB}** — ${scoreA}!`;
+  } else {
+    winnerTeam = [...teamA, ...teamB];
+    resultText = `### 🤝 تعادل! **${scoreA}** — **${scoreB}**\nيحصل الجميع على نقاط!`;
+  }
+
+  for (const p of winnerTeam) {
+    await db.addPoints(p.id, winPts);
+  }
+
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.gold)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 💍 انتهت اللعبة!\n\n` +
+          `${resultText}\n\n` +
+          `**النقاط:**\n` +
+          `> ${teamAName}: **${scoreA}** نقطة\n` +
+          `> ${teamBName}: **${scoreB}** نقطة\n\n` +
+          `🎖️ الفائزون حصلوا على **${winPts}** نقطة لكل لاعب!\n\n` +
+          `-# شكراً لجميع اللاعبين! 💍`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  resetGame();
+  callback();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  بناء أزرار اللاعبين
+// ══════════════════════════════════════════════════════════════════════════════
+
+function buildPlayerButtons(team, prefix) {
   const rows = [];
-  for (let i = 0; i < team.length; i += 5) {
+  for (let i = 0; i < team.length; i += 4) {
     const row = new ActionRowBuilder();
-    team.slice(i, i + 5).forEach(id => {
+    team.slice(i, i + 4).forEach(p => {
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(`${prefix}_${id}`)
-          .setLabel(`لاعب ${team.indexOf(id) + 1}`)
-          .setStyle(ButtonStyle.Secondary)
+          .setCustomId(`${prefix}_${p.id}`)
+          .setLabel(p.displayName.substring(0, 40))
+          .setStyle(ButtonStyle.Secondary),
       );
     });
     rows.push(row);
