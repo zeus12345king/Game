@@ -28,7 +28,7 @@ module.exports = {
     replica:   'https://timg.eu.cc/Weat0p7pk_.png', // ريبلكا 
     xo:        'https://timg.eu.cc/mo96RwDxpE.png', // اكس-و 
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
-    mahbas:    'https://timg.eu.cc/2oSPlSjLG-.png', // محبس
+    mahbas:    'https://iili.io/Cqw36mJ.png', // محبس
     reverse:   'https://timg.eu.cc/IWQN7p3a-j.png', // عكسي
     outsider:  'img/out.png', // برا السالفة
   },
