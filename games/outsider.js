@@ -25,7 +25,7 @@ const http   = require('http');
 
 // ─── ثوابت ───────────────────────────────────────────────────────
 const MIN_PLAYERS   = 3;
-const MAX_PLAYERS   = 20;
+const MAX_PLAYERS   = 10;
 const LOBBY_TIME    = config.lobbyTime?.outsider ?? 60_000;   // ms
 
 // أوقات الأوضاع
@@ -349,7 +349,8 @@ async function runClassicMode({ context, players, callback }) {
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
   const insiders    = players.filter((_, i) => i !== outsiderIdx);
-  const order       = shuffle(insiders);
+  // التعديل الوحيد: إشراك الجميع (بمن فيهم الجاسوس) في ترتيب التلميحات
+  const order       = shuffle(players);
 
   // إرسال الأدوار سراً
   await context.channel.send({
