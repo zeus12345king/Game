@@ -25,6 +25,7 @@ module.exports = {
     hide:      'https://timg.eu.cc/vBgwQ-NM-I.png', // هايد او غميضة 
     rps:       'https://timg.eu.cc/F6skdkx7Z5.png', // حجرة ورقة مقص 
     bomb:      'https://iili.io/CqJjT2n.png', // قنبلة 
+    guess:     'img/guess.png', // تخمين
     replica:   'https://timg.eu.cc/Weat0p7pk_.png', // ريبلكا 
     xo:        'https://timg.eu.cc/mo96RwDxpE.png', // اكس-و 
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
@@ -46,6 +47,7 @@ shopImages: {
     hide:      0xFFFFFF,
     rps:       0xFFFFFF,
     bomb:      0xFFFFFF,
+    guess:     0xFFFFFF,
     replica:   0xFFFFFF,
     xo:        0xFFFFFF,
     chairs:    0xFFFFFF,
@@ -92,6 +94,7 @@ shopImages: {
     hide:      10,
     rps:       { min: 5, max: 15 },
     bomb:      { min: 5, max: 15 },
+    guess:     { min: 5, max: 15 },
     replica:   { min: 5, max: 15 },
     xo:        { min: 5, max: 15 },
     chairs:    10,
@@ -107,6 +110,7 @@ shopImages: {
     hide:      40000,
     rps:       40000,
     bomb:      40000,
+    guess:     40000,
     replica:   40000,
     xo:        40000,
     chairs:    40000,
