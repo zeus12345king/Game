@@ -452,9 +452,18 @@ async function runLobby(context, callback) {
     if (img) c.addMediaGalleryComponents(g => g.addItems(item => item.setURL(img)));
 
     c.addActionRowComponents(r => r.setComponents(
-      new ButtonBuilder().setCustomId('join').setLabel('انضمام').setStyle(ButtonStyle.Success).setEmoji('✋'),
-      new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Danger).setEmoji('🚪'),
-    ));
+  new ButtonBuilder()
+    .setCustomId('join')
+    .setLabel('دخول')
+    .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
+    .setEmoji('<:z1:1511780346008436946>'),                 // يمكنك تغيير إيموجي الدخول من هنا
+
+  new ButtonBuilder()
+    .setCustomId('exit')
+    .setLabel('خروج')
+    .setStyle(ButtonStyle.Secondary) // تغيير اللون إلى رمادي
+    .setEmoji('<:z2:1511780387506880542>'),                 // يمكنك تغيير إيموجي الخروج من هنا
+));
     return c;
   }
 
