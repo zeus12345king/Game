@@ -39,7 +39,7 @@ const MAX_PLAYERS    = 2;
 const LOBBY_TIME     = config.lobbyTime?.guess ?? 40_000;
 const SECRET_TIMEOUT = 90_000;   // مهلة إدخال الرقم السري
 const RPS_TIMEOUT    = 30_000;
-const TURN_TIMEOUT   = 60_000;   // مهلة دور اللاعب
+const TURN_TIMEOUT   = 15_000;   // مهلة دور اللاعب
 const MIN_NUM        = 1;
 const MAX_NUM        = 100;
 
@@ -463,10 +463,6 @@ async function runLobby(context, callback) {
     flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
   });
-
-  // Canvas للوبي
-  const lobbyCanvas = await buildLobbyCanvas(players);
-  if (lobbyCanvas) await context.channel.send({ files: [lobbyCanvas] });
 
   const col = lobbyMsg.createMessageComponentCollector({
     filter: i => i.customId === 'join' || i.customId === 'exit',
