@@ -9,7 +9,7 @@
 //  2. BLUFF   — كل لاعب في الفريق المخبي يختار إيماءة يد (تشويش بصري)
 //  3. REVEAL  — تُعرض الإيماءات للجميع علناً + توتر
 //  4. DISCUSS — الفريق المخمن يناقش 30 ثانية
-//  5. GUESS   — محاولتان للتخمين (2 نقطة / 1 نقطة)
+//  5. GUESS   — عدد المحاولات يعتمد على حجم الفريق المُخفي
 //  6. RESULT  — كشف النتيجة بصرياً
 //
 //  بطاقات خاصة (Power Cards) — مرة واحدة طوال اللعبة لكل فريق:
@@ -428,7 +428,7 @@ async function runLobby(context, callback) {
             `### 📜 قواعد سريعة\n` +
             `> 💍 الفريق المخبي يخفي المحبس في يد أحد أعضائه سراً\n` +
             `> 🤌 الجميع يختارون إيماءة يد لإرباك الفريق الخصم\n` +
-            `> 🔍 الفريق المخمن يملك **محاولتان**: الأولى بـ **${PTS_GUESS_1ST} نقاط**، الثانية بـ **${PTS_GUESS_2ND} نقطة**\n` +
+            `> 🔍 الفريق المخمن يملك **محاولات حسب حجم الفريق المخفي**\n` +
             `> 🛡️ فشل التخمين = **${PTS_HIDE_WIN} نقاط** للفريق المخبي\n` +
             `> ✨ كل فريق يملك **3 بطاقات خاصة** تُستخدم مرة واحدة فقط!\n\n` +
             `-# ${TOTAL_ROUNDS} جولات — أعلى نقطة يفوز!`,
@@ -888,10 +888,13 @@ async function offerPowerCard(context, guessingTeam, guessPowers, guessingName, 
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  4. مرحلة التخمين (محاولتان)
+//  4. مرحلة التخمين (عدد محاولات متغير حسب حجم الفريق المخفي)
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hidingName, holder, totalTime) {
+  // ── تحديد عدد المحاولات بناءً على عدد لاعبي الفريق المخفي ──
+  const maxAttempts = hidingTeam.length === 2 ? 1 : hidingTeam.length >= 8 ? 3 : 2;
+
   // ── مرحلة النقاش ──
   await context.channel.send({
     components: [
@@ -899,7 +902,8 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
         .addTextDisplayComponents(t => t.setContent(
           `## 💬 وقت النقاش — ${guessingName}\n\n` +
           `ناقشوا بينكم من يحمل المحبس!\n` +
-          `لديكم **${T_DISCUSS / 1000} ثانية** للنقاش قبل التخمين.\n\n` +
+          `لديكم **${T_DISCUSS / 1000} ثانية** للنقاش قبل التخمين.\n` +
+          `عدد المحاولات المتاحة: **${maxAttempts}**\n\n` +
           `-# اللاعبون: ${guessingTeam.map(p => `<@${p.id}>`).join(' ')}`,
         )),
     ],
@@ -908,10 +912,17 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
 
   await sleep(T_DISCUSS);
 
-  // ── التخمين: محاولتان ──
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  // ── التخمين: عدد المحاولات حسب maxAttempts ──
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // حساب النقاط: الأولى 2 نقطة، الباقي (ثانية، ثالثة) 1 نقطة
     const pts = attempt === 1 ? PTS_GUESS_1ST : PTS_GUESS_2ND;
-    const guessTimeLeft = attempt === 1 ? totalTime : Math.floor(totalTime * 0.6);
+
+    // الوقت المتبقي: الأولى كامل، الثانية 60%، الثالثة (إن وجدت) 40%
+    const guessTimeLeft = attempt === 1
+      ? totalTime
+      : attempt === 2
+        ? Math.floor(totalTime * 0.6)
+        : Math.floor(totalTime * 0.4);
 
     // بناء أزرار الفريق المخبي
     const btnRows = buildPlayerButtons(hidingTeam, `guess${attempt}`);
@@ -921,7 +932,7 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
       components: [
         new ContainerBuilder().setAccentColor(attempt === 1 ? CLR.gold : CLR.warn)
           .addTextDisplayComponents(t => t.setContent(
-            `## 🔍 المحاولة ${attempt} / 2\n\n` +
+            `## 🔍 المحاولة ${attempt} / ${maxAttempts}\n\n` +
             `${guessingName} — اختاروا من يحمل المحبس!\n` +
             `> 🏆 الإجابة الصحيحة = **${pts} نقطة**\n` +
             `> ⏰ ${guessTimeLeft / 1000} ثانية\n\n` +
@@ -972,7 +983,7 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
         ],
         flags: MessageFlags.IsComponentsV2,
       });
-      if (attempt === 2) return { success: false, attempt: 0, guesser: null };
+      if (attempt === maxAttempts) return { success: false, attempt: 0, guesser: null };
       continue;
     }
 
@@ -1000,15 +1011,15 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
             .addTextDisplayComponents(t => t.setContent(
               `## ❌ خطأ!\n` +
               `<@${chosen.targetId}> لا يحمل المحبس!\n\n` +
-              (attempt === 1
-                ? `لديكم محاولة أخيرة 🎯`
+              (attempt < maxAttempts
+                ? `لديكم ${maxAttempts - attempt} محاولات متبقية 🎯`
                 : `انتهت المحاولات!`),
             )),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
 
-      if (attempt === 2) return { success: false, attempt: 0, guesser: null };
+      if (attempt === maxAttempts) return { success: false, attempt: 0, guesser: null };
       await sleep(2000);
     }
   }
@@ -1073,17 +1084,20 @@ async function finalResults(context, state, callback) {
   const { scoreA, scoreB, teamA, teamB, teamAName, teamBName } = state;
 
   const winPts = config.winPoints?.mahbas ?? 100;
-  let resultText, winnerTeam;
+  let resultText, winnerTeam, membersLine;
 
   if (scoreA > scoreB) {
     winnerTeam = teamA;
     resultText = `### 🏆 فاز **${teamAName}** بنتيجة **${scoreA}** — ${scoreB}!`;
+    membersLine = `> 🎖️ أعضاء الفريق الفائز: ${winnerTeam.map(p => `<@${p.id}>`).join(' • ')}`;
   } else if (scoreB > scoreA) {
     winnerTeam = teamB;
     resultText = `### 🏆 فاز **${teamBName}** بنتيجة **${scoreB}** — ${scoreA}!`;
+    membersLine = `> 🎖️ أعضاء الفريق الفائز: ${winnerTeam.map(p => `<@${p.id}>`).join(' • ')}`;
   } else {
     winnerTeam = [...teamA, ...teamB];
     resultText = `### 🤝 تعادل! **${scoreA}** — **${scoreB}**\nيحصل الجميع على نقاط!`;
+    membersLine = `> 🎖️ أعضاء الفريقين المتعادلين: ${winnerTeam.map(p => `<@${p.id}>`).join(' • ')}`;
   }
 
   for (const p of winnerTeam) {
@@ -1099,6 +1113,7 @@ async function finalResults(context, state, callback) {
           `**النقاط:**\n` +
           `> ${teamAName}: **${scoreA}** نقطة\n` +
           `> ${teamBName}: **${scoreB}** نقطة\n\n` +
+          `${membersLine}\n\n` +
           `🎖️ الفائزون حصلوا على **${winPts}** نقطة لكل لاعب!\n\n` +
           `-# شكراً لجميع اللاعبين! 💍`,
         )),
