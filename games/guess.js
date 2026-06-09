@@ -45,7 +45,7 @@ const MAX_NUM        = 100;
 
 // ألوان اللعبة
 const CLR = {
-  main    : 0x3498DB,   // أزرق
+  main    : 0xD48A9C,   // أزرق
   success : 0x2ECC71,
   danger  : 0xE74C3C,
   neutral : 0x2C3E50,
