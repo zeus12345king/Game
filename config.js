@@ -9,7 +9,7 @@ module.exports = {
     '656783724662226963',
   ],
 
-  // رولات الأدمن (يقدرون يستخدمون أوامرر الإدارة)
+  // رولات الأدمن (يقدرون يستخدمون أوامر الإدارة)
   adminRoles: [
     '',
   ],
@@ -26,6 +26,7 @@ module.exports = {
     rps:       'https://timg.eu.cc/F6skdkx7Z5.png', // حجرة ورقة مقص 
     bomb:      'https://iili.io/CqJjT2n.png', // قنبلة 
     guess:     'https://iili.io/CBdjqEg.png', // تخمين
+    bingo:     'https://iili.io/CBdjqEg.png', // بنغو التحدي
     replica:   'https://timg.eu.cc/Weat0p7pk_.png', // ريبلكا 
     xo:        'https://timg.eu.cc/mo96RwDxpE.png', // اكس-و 
     chairs:    'https://timg.eu.cc/swFHoZJXQM.png', // كراس
@@ -35,11 +36,12 @@ module.exports = {
   },
 
   // صور المتجر لكل لعبة (اختياري)
-shopImages: {
-  roulette: 'https://iili.io/CKQuDkQ.jpg',
-},
+  shopImages: {
+    roulette: 'https://iili.io/CKQuDkQ.jpg',
+    bingo:    'img/bingo_shop.png', // صورة متجر البنغو
+  },
 
-   // الاوان تبع الشريط الجانبي للأمبيد v2
+  // الاوان تبع الشريط الجانبي للأمبيد v2
   colors: {
     roulette:  0xFFFFFF,
     mafia:     0xFFFFFF,
@@ -48,6 +50,7 @@ shopImages: {
     rps:       0xFFFFFF,
     bomb:      0xFFFFFF,
     guess:     0xFFFFFF,
+    bingo:     0xD48A9C, // وردي
     replica:   0xFFFFFF,
     xo:        0xFFFFFF,
     chairs:    0xFFFFFF,
@@ -66,8 +69,6 @@ shopImages: {
     neutral:   0xFFFFFF,
     closed:    0xFFFFFF,
   },
-
-
 
   // الإيموجيات المركزية المشتركة لجميع الألعاب والأوامر
   emojis: {
@@ -95,6 +96,7 @@ shopImages: {
     rps:       { min: 5, max: 15 },
     bomb:      { min: 5, max: 15 },
     guess:     { min: 5, max: 15 },
+    bingo:     { min: 10, max: 25 }, // نقاط فوز البنغو
     replica:   { min: 5, max: 15 },
     xo:        { min: 5, max: 15 },
     chairs:    10,
@@ -111,6 +113,7 @@ shopImages: {
     rps:       40000,
     bomb:      40000,
     guess:     40000,
+    bingo:     40000, // مدة لوبي البنغو
     replica:   40000,
     xo:        40000,
     chairs:    40000,
@@ -120,7 +123,6 @@ shopImages: {
   },
 
   // أسعار قدرات الروليت و المتجر
-
   abilityCosts: {
     roulette: {
       nuclear: 200,
@@ -129,6 +131,12 @@ shopImages: {
       freeze:   40,
       twice:    30,
       revive:   20,
+    },
+    bingo: {
+      double_vote:  40,
+      disable_vote: 40,
+      force_draw:   60,
+      block_claim:  50,
     }
   },
 
