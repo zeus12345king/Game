@@ -474,7 +474,7 @@ async function runLobby(context, callback) {
 
 // بناء رسالة المتجر
 async function buildShopMessage(userId) {
-  const balance = await db.getPoints(userId) || 0;
+  const balance = await db.getUserPoints(userId) || 0;
   const description = Object.entries(ABILITIES).map(([key, val]) =>
     `**${val.emoji} ${val.name}** — ${val.desc}\nالسعر: \`${val.cost}\` نقطة`
   ).join('\n\n');
@@ -666,7 +666,7 @@ async function gameLoop(context, state, callback) {
       shopCol.on('collect', async mi => {
         const abilityKey = mi.values[0];
         const ability = ABILITIES[abilityKey];
-        const balance = await db.getPoints(i.user.id) || 0;
+        const balance = await db.getUserPoints(i.user.id) || 0;
         if (balance < ability.cost) {
           await mi.reply({ content: '❌ رصيد غير كاف.', ephemeral: true });
           return;
