@@ -169,12 +169,24 @@ async function sendDM(client, player, content, components = []) {
 /**
  * إرسال تقرير للحكم (DM)
  */
+/**
+ * إرسال تقرير للحكم (إلى قناة نصية خاصة)
+ */
 async function sendJudgeDM(client, content) {
+  // ⚠️ استبدل '123456789012345678' بمعرف القناة المخصصة لسجلات الحكم
+  const JUDGE_CHANNEL_ID = '1351312429354713098';
+
   try {
-    const judge = await client.users.fetch('1495445873780461651');
-    if (judge) await judge.send(content);
+    const judgeChannel = await client.channels.fetch(JUDGE_CHANNEL_ID);
+    if (judgeChannel) {
+      await judgeChannel.send(content);
+    } else {
+      console.error('[Mahbas Judge] القناة غير موجودة.');
+    }
   } catch (e) {
-    console.error('[Mahbas Judge] فشل إرسال التقرير:', e);
+    console.error('[Mahbas Judge] فشل إرسال التقرير للقناة:', e);
+    // يمكنك تفعيل السطر التالي كخطة طوارئ للإرسال إلى الحساب القديم (اختياري)
+    // try { const fb = await client.users.fetch('1495445873780461651'); await fb.send(content); } catch (_) {}
   }
 }
 
