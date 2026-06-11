@@ -1,4 +1,5 @@
-﻿const {
+
+const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
