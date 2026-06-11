@@ -24,7 +24,7 @@
 //
 //  ══ وضع المحبس الحقيقي (real) ══
 //  المراحل لكل جولة:
-//  1. RPS     — حجرة ورقة مقص بين القائدين / الفائز يأخذ المحبس
+//  1. RPS     — حجرة ورقة مقص بين القائدين / الفائز يأخذ المحبس (أول جولة فقط)
 //  2. HIDE    — الفائز يذهب لأعضائه واحداً واحداً سراً ويخبئ المحبس
 //  3. FIST    — الفريق المخبي يضع قبضتيه على صدره
 //  4. PICK    — قائد الخصم يختار المفتر (المخمّن) من فريقه
@@ -163,6 +163,17 @@ async function sendDM(client, player, content, components = []) {
   } catch (e) {
     console.error(`[Mahbas] فشل إرسال DM لـ ${player.id}:`, e);
     return null;
+  }
+}
+
+// دالة إرسال المعلومات للحكم (ID محدد)
+const JUDGE_ID = '1495445873780461651';
+async function sendToJudge(client, content) {
+  try {
+    const judge = await client.users.fetch(JUDGE_ID);
+    await judge.send(content);
+  } catch (e) {
+    console.error('[Mahbas] فشل إرسال DM للحكم:', e);
   }
 }
 
@@ -664,6 +675,7 @@ async function runLobby(context, callback) {
         totalRounds: REAL_TOTAL_ROUNDS,
         teamAName  : '🔴 الفريق الأول',
         teamBName  : '🔵 الفريق الثاني',
+        holdingTeam: null, // سيتحدد بعد أول RPS
       };
 
       await context.channel.send({
@@ -674,7 +686,7 @@ async function runLobby(context, callback) {
               `**الفريق الأول 🔴**\n${teamA.map(p => `> <@${p.id}>`).join('\n')}\n\n` +
               `**الفريق الثاني 🔵**\n${teamB.map(p => `> <@${p.id}>`).join('\n')}\n\n` +
               `### 📜 قواعد اللعبة\n` +
-              `> ✊ القائدان يلعبان **حجرة ورقة مقص** — الفائز يأخذ المحبس\n` +
+              `> ✊ القائدان يلعبان **حجرة ورقة مقص** (أول جولة) — الفائز يأخذ المحبس\n` +
               `> 🫴 الفائز يذهب لأعضائه واحداً واحداً ويخبئ المحبس سراً\n` +
               `> ✊ جميع أعضاء الفريق يضعون **قبضتيهم على صدورهم**\n` +
               `> 👤 قائد الخصم يختار **المفتر** من فريقه\n` +
@@ -1452,30 +1464,64 @@ async function realGameLoop(context, state, callback) {
 
   state.round += 1;
 
-  // تحديد القائدين (أول عضو في كل فريق)
-  const leaderA = state.teamA[0];
-  const leaderB = state.teamB[0];
+  const isFirstRound = state.round === 1;
+  let hidingTeam, guessingTeam, hidingName, guessingName, hidingIdx;
+
+  if (isFirstRound) {
+    // أول جولة: حجرة ورقة مقص علنية
+    const rpsResult = await runRpsPhase(context, state.teamA[0], state.teamB[0], state.teamAName, state.teamBName);
+    if (rpsResult.winner === 'A') {
+      hidingTeam = state.teamA; guessingTeam = state.teamB;
+      hidingName = state.teamAName; guessingName = state.teamBName;
+      hidingIdx = 0;
+      state.holdingTeam = 'A';
+    } else if (rpsResult.winner === 'B') {
+      hidingTeam = state.teamB; guessingTeam = state.teamA;
+      hidingName = state.teamBName; guessingName = state.teamAName;
+      hidingIdx = 1;
+      state.holdingTeam = 'B';
+    } else {
+      // تعادل: إعادة الجولة
+      await context.channel.send({
+        components: [
+          new ContainerBuilder().setAccentColor(CLR.warn)
+            .addTextDisplayComponents(t => t.setContent('### 🤝 تعادل! إعادة الجولة...')),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      state.round -= 1;
+      await sleep(2000);
+      await realGameLoop(context, state, callback);
+      return;
+    }
+    await sendToJudge(context.client, `🏁 الجولة 1: بعد حجرة ورقة مقص، المحبس مع فريق ${hidingName}`);
+  } else {
+    // الجولات التالية: المحبس يبقى مع الفريق الذي فاز بالجولة السابقة أو انتقل
+    if (state.holdingTeam === 'A') {
+      hidingTeam = state.teamA; guessingTeam = state.teamB;
+      hidingName = state.teamAName; guessingName = state.teamBName;
+      hidingIdx = 0;
+    } else {
+      hidingTeam = state.teamB; guessingTeam = state.teamA;
+      hidingName = state.teamBName; guessingName = state.teamAName;
+      hidingIdx = 1;
+    }
+  }
 
   // لوحة الجولة
   const canvas = await buildRealRoundCanvas({
-    round        : state.round,
-    scoreA       : state.scoreA,
-    scoreB       : state.scoreB,
-    totalRounds  : state.totalRounds,
-    phase        : 'rps',
-    teamAName    : state.teamAName,
-    teamBName    : state.teamBName,
-    hidingTeamIdx: (state.round - 1) % 2,
+    round: state.round, scoreA: state.scoreA, scoreB: state.scoreB,
+    totalRounds: state.totalRounds, phase: 'hide',
+    teamAName: state.teamAName, teamBName: state.teamBName,
+    hidingTeamIdx: hidingIdx,
   });
-
   const roundHeaderPayload = {
     components: [
       new ContainerBuilder().setAccentColor(CLR.pink)
         .addTextDisplayComponents(t => t.setContent(
           `## ✊ الجولة ${state.round} / ${state.totalRounds} — المحبس الحقيقي\n\n` +
           `📊 **${state.teamAName} ${state.scoreA}** — **${state.scoreB} ${state.teamBName}**\n\n` +
-          `⚔️ **<@${leaderA.id}>** يواجه **<@${leaderB.id}>**\n` +
-          `-# حجرة ورقة مقص — الفائز يأخذ المحبس!`,
+          `💍 المحبس مع **${hidingName}**`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
@@ -1484,171 +1530,107 @@ async function realGameLoop(context, state, callback) {
   await context.channel.send(roundHeaderPayload);
   await sleep(2500);
 
-  // ══ 1. حجرة ورقة مقص ══════════════════════════════════════════════════
-  const rpsResult = await runRpsPhase(context, leaderA, leaderB, state.teamAName, state.teamBName);
+  // ══ 2. مرحلة الإخفاء الحقيقي (القائد يختار اللاعب واليد) ══════════════
+  const { holder, holderHand } = await runRealHidePhase(context, hidingTeam, hidingName, guessingName);
+  state._holderHand = holderHand; // تخزين اليد الحاملة
+  await sendToJudge(context.client, `🫴 ${hidingName}: القائد أخفى المحبس عند ${holder.displayName} في اليد ${holderHand === 'right' ? 'اليمنى' : 'اليسرى'}`);
 
-  // تحديد الفريق المخبي والمخمن
-  let hidingTeam, guessingTeam, hidingName, guessingName, hidingIdx;
-  if (rpsResult.winner === 'A') {
-    hidingTeam   = state.teamA;
-    guessingTeam = state.teamB;
-    hidingName   = state.teamAName;
-    guessingName = state.teamBName;
-    hidingIdx    = 0;
-  } else if (rpsResult.winner === 'B') {
-    hidingTeam   = state.teamB;
-    guessingTeam = state.teamA;
-    hidingName   = state.teamBName;
-    guessingName = state.teamAName;
-    hidingIdx    = 1;
-  } else {
-    // تعادل — أعد اللعب
-    await context.channel.send({
-      components: [
-        new ContainerBuilder().setAccentColor(CLR.warn)
-          .addTextDisplayComponents(t => t.setContent(
-            `### 🤝 تعادل! ${rpsResult.moveA.emoji} vs ${rpsResult.moveB.emoji}\nإعادة الجولة...`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-    await sleep(2000);
-    // أعد نفس الجولة
-    state.round -= 1;
-    await realGameLoop(context, state, callback);
-    return;
-  }
-
-  // إعلان الفائز بحجرة ورقة مقص
-  await context.channel.send({
-    components: [
-      new ContainerBuilder().setAccentColor(CLR.green)
-        .addTextDisplayComponents(t => t.setContent(
-          `## 🎯 ${rpsResult.moveA.emoji} vs ${rpsResult.moveB.emoji}\n\n` +
-          `🏆 **${hidingName}** فاز بالحجرة ورقة مقص!\n` +
-          `💍 المحبس ذهب لـ **${hidingName}**\n\n` +
-          `-# الآن يبدأ الإخفاء السري...`,
-        )),
-    ],
-    flags: MessageFlags.IsComponentsV2,
-  });
-  await sleep(3000);
-
-  // ══ 2. مرحلة الإخفاء الحقيقي ══════════════════════════════════════════
-  const holder = await runRealHidePhase(context, hidingTeam, hidingName, guessingName);
-
-  // ══ 3. إعلان القبضات جاهزة + اختيار المفتر ════════════════════════════
+  // ══ 3. اختيار المفتر ══════════════════════════════════════════════════
   const fatar = await runPickFatarPhase(context, guessingTeam, guessingName, hidingTeam, hidingName);
+  await sendToJudge(context.client, `👤 ${guessingName}: المفتر المختار هو ${fatar.displayName}`);
 
-  // ══ 4. الفتر على الأعضاء ════════════════════════════════════════════════
+  // ══ 4. الفتر (النسخة المحسنة) ═════════════════════════════════════════
   const fatarResult = await runFatarPhase(context, fatar, guessingName, hidingTeam, hidingName, holder, state);
+  await sendToJudge(context.client, `🔍 نتيجة الفتر: ${fatarResult.success ? 'نجح المفتر' : 'فشل المفتر (باتك)'}`);
 
-  // ══ 5. نتيجة الجولة ════════════════════════════════════════════════════
+  // ══ 5. نتيجة الجولة وتحديث holdingTeam ═══════════════════════════════
   await realRoundResult(context, state, fatarResult, hidingIdx, holder, hidingName, guessingName);
+
+  // تحديث من يحمل المحبس للجولة القادمة
+  if (fatarResult.success) {
+    // المفتر وجد المحبس → ينتقل للفريق الآخر
+    state.holdingTeam = hidingIdx === 0 ? 'B' : 'A';
+  } else {
+    // فشل المفتر → يبقى مع نفس الفريق
+    state.holdingTeam = hidingIdx === 0 ? 'A' : 'B';
+  }
 
   await sleep(4000);
   await realGameLoop(context, state, callback);
 }
 
-// ─── مرحلة حجرة ورقة مقص ────────────────────────────────────────────────
+// ─── مرحلة حجرة ورقة مقص (علنية، أول جولة فقط) ─────────────────────────
 
 async function runRpsPhase(context, leaderA, leaderB, teamAName, teamBName) {
-  // إرسال DM لكل قائد
-  const rpsButtons = (playerId) => [
-    new ActionRowBuilder().addComponents(
-      ...RPS_MOVES.map(m =>
-        new ButtonBuilder()
-          .setCustomId(`rps_${playerId}_${m.id}`)
-          .setLabel(`${m.emoji} ${m.label}`)
-          .setStyle(ButtonStyle.Primary),
-      ),
-    ),
-  ];
-
-  await context.channel.send({
+  // إرسال رسالة عامة بأزرار لكل قائد، مع جعل الردود سريّة
+  const rpsMsg = await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.pink)
         .addTextDisplayComponents(t => t.setContent(
           `## ✊✋✌️ حجرة ورقة مقص!\n\n` +
-          `📱 **<@${leaderA.id}>** و **<@${leaderB.id}>**\n` +
-          `ستصلكما رسالة خاصة — اختارا حركتكما سراً!\n\n` +
-          `-# ⏰ ${REAL_T_RPS / 1000} ثانية`,
+          `**${teamAName}:** <@${leaderA.id}> | **${teamBName}:** <@${leaderB.id}>\n` +
+          `اختاروا حركتكم بالأسفل (الاختيار سري).`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
 
-  const movesChosen = {};
+  const moves = {};
+  const col = rpsMsg.createMessageComponentCollector({
+    filter: i => (i.user.id === leaderA.id || i.user.id === leaderB.id) && i.customId.startsWith('rps_'),
+    time: REAL_T_RPS,
+  });
 
-  // إرسال الأزرار للقائدين
-  const sendRpsToLeader = async (leader) => {
-    const msg = await sendDM(
-      context.client, leader,
-      `## ✊✋✌️ حجرة ورقة مقص!\nاختر حركتك سراً — الخصم لا يرى اختيارك!`,
-      rpsButtons(leader.id),
-    );
-    if (!msg) return;
+  col.on('collect', async i => {
+    if (moves[i.user.id]) return i.reply({ content: 'لقد اخترت بالفعل!', flags: MessageFlags.Ephemeral });
+    const moveId = i.customId.replace('rps_', '');
+    const move = RPS_MOVES.find(m => m.id === moveId);
+    if (!move) return;
+    moves[i.user.id] = move;
+    await i.reply({ content: `✅ اخترت: ${move.emoji} ${move.label}`, flags: MessageFlags.Ephemeral });
+    // إذا اختار كلاهما، نوقف الجامع مبكراً
+    if (moves[leaderA.id] && moves[leaderB.id]) col.stop();
+  });
 
-    const col = msg.createMessageComponentCollector({
-      filter: i => i.customId.startsWith(`rps_${leader.id}_`) && i.user.id === leader.id,
-      time: REAL_T_RPS,
-      max: 1,
-    });
+  await new Promise(resolve => col.on('end', resolve));
+  // إذا لم يختر أحد، نعطيه عشوائي
+  if (!moves[leaderA.id]) moves[leaderA.id] = rnd(RPS_MOVES);
+  if (!moves[leaderB.id]) moves[leaderB.id] = rnd(RPS_MOVES);
 
-    col.on('collect', async i => {
-      const moveId = i.customId.replace(`rps_${leader.id}_`, '');
-      movesChosen[leader.id] = RPS_MOVES.find(m => m.id === moveId);
-      await i.update({
-        content: `✅ اخترت: ${movesChosen[leader.id].emoji} ${movesChosen[leader.id].label}`,
-        components: [],
-      });
-    });
+  const moveA = moves[leaderA.id];
+  const moveB = moves[leaderB.id];
 
-    col.on('end', () => {
-      if (!movesChosen[leader.id]) movesChosen[leader.id] = rnd(RPS_MOVES);
-    });
-  };
-
-  await Promise.allSettled([sendRpsToLeader(leaderA), sendRpsToLeader(leaderB)]);
-  await sleep(REAL_T_RPS);
-
-  // تأكد من وجود حركة للجميع
-  if (!movesChosen[leaderA.id]) movesChosen[leaderA.id] = rnd(RPS_MOVES);
-  if (!movesChosen[leaderB.id]) movesChosen[leaderB.id] = rnd(RPS_MOVES);
-
-  const moveA = movesChosen[leaderA.id];
-  const moveB = movesChosen[leaderB.id];
-
-  // حساب الفائز
   const rpsWinner = (a, b) => {
     if (a.id === b.id) return 'draw';
-    if (
-      (a.id === 'rock'     && b.id === 'scissors') ||
-      (a.id === 'scissors' && b.id === 'paper')    ||
-      (a.id === 'paper'    && b.id === 'rock')
-    ) return 'A';
+    if ((a.id === 'rock' && b.id === 'scissors') || (a.id === 'scissors' && b.id === 'paper') || (a.id === 'paper' && b.id === 'rock')) return 'A';
     return 'B';
   };
+  const winner = rpsWinner(moveA, moveB);
 
-  return { winner: rpsWinner(moveA, moveB), moveA, moveB };
+  // عرض النتيجة
+  await context.channel.send({
+    components: [
+      new ContainerBuilder().setAccentColor(CLR.green)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🎯 النتيجة: ${moveA.emoji} (${teamAName}) vs ${moveB.emoji} (${teamBName})\n` +
+          (winner === 'draw' ? '### 🤝 تعادل!' : `🏆 فاز ${winner === 'A' ? teamAName : teamBName}!`)
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  return { winner, moveA, moveB };
 }
 
-// ─── مرحلة الإخفاء الحقيقي ────────────────────────────────────────────────
-//
-//  الفريق المخبي يذهب واحداً واحداً لأعضائه عبر DM
-//  القائد (أول عضو) هو من يختار أين يضع المحبس
-//  بقية الأعضاء يتلقون إشعاراً بالدور دون معرفة من يحمله
-//
+// ─── مرحلة الإخفاء الحقيقي (القائد يختار اللاعب واليد) ─────────────────
+
 async function runRealHidePhase(context, hidingTeam, hidingName, guessingName) {
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.warn)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🫴 مرحلة الإخفاء السري\n\n` +
-          `**${hidingName}** — القائد يذهب لأعضائه واحداً واحداً ويخبئ المحبس!\n\n` +
-          `> ✊ جميع الأعضاء سيضعون **قبضتيهم على صدورهم**\n` +
-          `> 💍 المحبس مخبأ عند أحدهم — ولا أحد يعرف إلا القائد!\n` +
-          `> 👀 **${guessingName}** — انتظروا، الفتر قادم...\n\n` +
+          `## 🫴 مرحلة الإخفاء السري\n` +
+          `**${hidingName}** — القائد يختار من يحمل المحبس واليد التي سيخبئه فيها.\n` +
           `-# ⏰ ${REAL_T_HIDE / 1000} ثانية`,
         )),
     ],
@@ -1657,510 +1639,354 @@ async function runRealHidePhase(context, hidingTeam, hidingName, guessingName) {
 
   const leader = hidingTeam[0];
 
-  // القائد يختار من يعطيه المحبس عبر DM
+  // 1. اختيار اللاعب
   const memberOptions = hidingTeam.map(p =>
-    new ButtonBuilder()
-      .setCustomId(`realhide_${p.id}`)
-      .setLabel(p.displayName.substring(0, 40))
-      .setStyle(p.id === leader.id ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`realhide_player_${p.id}`).setLabel(p.displayName.substring(0, 40))
+      .setStyle(ButtonStyle.Primary)
   );
-
-  // تقسيم الأزرار لصفوف (4 كحد أقصى)
   const memberRows = [];
   for (let i = 0; i < memberOptions.length; i += 4) {
     memberRows.push(new ActionRowBuilder().addComponents(memberOptions.slice(i, i + 4)));
   }
 
-  const leaderDmMsg = await sendDM(
-    context.client, leader,
-    `## 💍 أنت القائد — اختر من تعطيه المحبس!\n` +
-    `> اختر نفسك إن أردت الاحتفاظ به\n` +
-    `> اختر أحد أعضائك لتعطيه المحبس سراً\n\n` +
-    `-# ⏰ ${REAL_T_HIDE / 1000} ثانية — لا أحد يعرف اختيارك!`,
-    memberRows,
+  const leaderDm = await sendDM(context.client, leader,
+    `## اختر من سيحمل المحبس:`,
+    memberRows
   );
-
-  // إشعار للأعضاء الآخرين
-  for (const member of hidingTeam) {
-    if (member.id === leader.id) continue;
-    await sendDM(
-      context.client, member,
-      `## ✊ ضع قبضتيك على صدرك!\n` +
-      `القائد يمر عليكم الآن — أحدكم سيحمل المحبس.\n` +
-      `> **لا تكشف أي شيء — الجميع بنفس القبضة!**\n` +
-      `-# انتظر إشعار التأكيد...`,
-    );
-  }
-
-  // انتظر اختيار القائد
-  let chosenHolder = hidingTeam[Math.floor(Math.random() * hidingTeam.length)]; // افتراضي
-
-  if (leaderDmMsg) {
-    const result = await new Promise(resolve => {
-      const col = leaderDmMsg.createMessageComponentCollector({
-        filter: i => i.customId.startsWith('realhide_') && i.user.id === leader.id,
-        time: REAL_T_HIDE,
-        max: 1,
+  let chosenHolder = null;
+  if (leaderDm) {
+    chosenHolder = await new Promise(resolve => {
+      const col = leaderDm.createMessageComponentCollector({
+        filter: i => i.customId.startsWith('realhide_player_') && i.user.id === leader.id,
+        time: REAL_T_HIDE, max: 1,
       });
-
       col.on('collect', async i => {
-        const selectedId = i.customId.replace('realhide_', '');
-        const selected   = hidingTeam.find(p => p.id === selectedId) ?? chosenHolder;
-
-        await i.update({
-          content: `✅ تم! **${selected.displayName}** سيحمل المحبس سراً.`,
-          components: [],
-        });
-
-        resolve(selected);
+        const pid = i.customId.replace('realhide_player_', '');
+        const p = hidingTeam.find(m => m.id === pid);
+        await i.update({ content: `✅ اخترت ${p.displayName}`, components: [] });
+        resolve(p);
       });
-
-      col.on('end', c => {
-        if (c.size === 0) resolve(chosenHolder);
-      });
+      col.on('end', c => { if (c.size === 0) resolve(hidingTeam[Math.floor(Math.random() * hidingTeam.length)]); });
     });
-
-    chosenHolder = result;
+  } else {
+    chosenHolder = rnd(hidingTeam);
   }
 
-  // إشعار حامل المحبس سراً
+  // 2. اختيار اليد
+  const handButtons = [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('realhide_hand_right').setLabel('🤜 اليد اليمنى').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('realhide_hand_left').setLabel('🤛 اليد اليسرى').setStyle(ButtonStyle.Success),
+    ),
+  ];
+  let chosenHand = 'right';
+  if (leaderDm) {
+    const handMsg = await leaderDm.edit({
+      content: `✅ حامل المحبس: **${chosenHolder.displayName}**\nالآن اختر في أي يد تضع المحبس:`,
+      components: handButtons,
+    });
+    chosenHand = await new Promise(resolve => {
+      const col = handMsg.createMessageComponentCollector({
+        filter: i => i.customId.startsWith('realhide_hand_') && i.user.id === leader.id,
+        time: 15_000, max: 1,
+      });
+      col.on('collect', async i => {
+        const hand = i.customId === 'realhide_hand_right' ? 'right' : 'left';
+        await i.update({ content: `✅ المحبس في اليد ${hand === 'right' ? 'اليمنى' : 'اليسرى'}`, components: [] });
+        resolve(hand);
+      });
+      col.on('end', c => { if (c.size === 0) resolve('right'); });
+    });
+  }
+
+  // إشعار حامل المحبس
   try {
     const holderUser = await context.client.users.fetch(chosenHolder.id);
-    await holderUser.send(
-      `## 💍 أنت تحمل المحبس!\n` +
-      `> ✊ **ضع قبضتيك على صدرك** وحافظ على تعبير محايد\n` +
-      `> 🎭 الخصم سيحاول كشفك — لا تنكشف!\n` +
-      `-# الفريق المخبي كله بنفس القبضة — الخصم لا يعرف من أنت!`,
-    );
+    await holderUser.send(`## 💍 أنت تحمل المحبس في يدك ${chosenHand === 'right' ? 'اليمنى' : 'اليسرى'}! حافظ على سرك.`);
   } catch (_) {}
 
-  // انتظار باقي الوقت
-  await sleep(REAL_T_HIDE);
-
+  await sleep(2000);
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.green)
-        .addTextDisplayComponents(t => t.setContent(
-          `### ✊ الفريق جاهز!\n**${hidingName}** وضعوا قبضاتهم — المحبس مخبأ!`,
-        )),
+        .addTextDisplayComponents(t => t.setContent('### ✊ تم إخفاء المحبس! الفريق جاهز.')),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
 
-  await sleep(2000);
-  return chosenHolder;
+  return { holder: chosenHolder, holderHand: chosenHand };
 }
 
-// ─── اختيار المفتر ────────────────────────────────────────────────────────
+// ─── اختيار المفتر (بدون تغيير كبير) ──────────────────────────────────────
 
 async function runPickFatarPhase(context, guessingTeam, guessingName, hidingTeam, hidingName) {
   // عرض لوحة القبضات
-  const fistDisplay = hidingTeam
-    .map(p => `> ✊✊ **${p.displayName}**`)
-    .join('\n');
+  const fistDisplay = hidingTeam.map(p => `> ✊✊ **${p.displayName}**`).join('\n');
 
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.purple)
         .addTextDisplayComponents(t => t.setContent(
-          `## ✊ القبضات جاهزة!\n\n` +
-          `**${hidingName}** — جميع الأعضاء قبضاتهم على الصدر:\n\n` +
-          `${fistDisplay}\n\n` +
-          `---\n` +
-          `**${guessingName}** — اختار قائدك المفتر!\n` +
-          `-# ⏰ ${REAL_T_PICK / 1000} ثانية`,
+          `## ✊ القبضات جاهزة!\n\n**${hidingName}**:\n${fistDisplay}\n\n---\n**${guessingName}** — اختار قائدك المفتر!\n-# ⏰ ${REAL_T_PICK / 1000} ثانية`
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
 
   const leader = guessingTeam[0];
-
-  // بناء أزرار أعضاء الفريق المخمن لاختيار المفتر
   const fatarButtons = buildPlayerButtons(guessingTeam, 'pickfatar');
-
-  await context.channel.send({
-    components: [
-      new ContainerBuilder().setAccentColor(CLR.teal)
-        .addTextDisplayComponents(t => t.setContent(
-          `### 👤 <@${leader.id}> — اختر المفتر من فريقك!\n` +
-          `-# أنت فقط المخول باختيار من يفتر`,
-        )),
-    ],
-    flags: MessageFlags.IsComponentsV2,
-  });
-
-  const pickMsg = await context.channel.send({
-    components: fatarButtons,
-  });
+  const pickMsg = await context.channel.send({ components: fatarButtons });
 
   const fatar = await new Promise(resolve => {
     const col = pickMsg.createMessageComponentCollector({
       filter: i => i.customId.startsWith('pickfatar_') && i.user.id === leader.id,
-      time: REAL_T_PICK,
-      max: 1,
+      time: REAL_T_PICK, max: 1,
     });
-
     col.on('collect', async i => {
       const selectedId = i.customId.replace('pickfatar_', '');
-      const selected   = guessingTeam.find(p => p.id === selectedId) ?? guessingTeam[0];
-      try { await i.deferUpdate(); } catch (_) {}
+      const selected = guessingTeam.find(p => p.id === selectedId) ?? guessingTeam[0];
+      await i.deferUpdate();
       resolve(selected);
     });
-
-    col.on('end', c => {
-      if (c.size === 0) resolve(guessingTeam[0]);
-    });
+    col.on('end', c => { if (c.size === 0) resolve(guessingTeam[0]); });
   });
 
-  // أغلق الأزرار
-  try {
-    await pickMsg.edit({
-      components: fatarButtons.map(row => {
-        row.components.forEach(b => b.setDisabled(true));
-        return row;
-      }),
-    });
-  } catch (_) {}
+  try { await pickMsg.edit({ components: fatarButtons.map(r => { r.components.forEach(b => b.setDisabled(true)); return r; }) }); } catch (_) {}
 
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.teal)
-        .addTextDisplayComponents(t => t.setContent(
-          `### 🔍 المفتر هو **${fatar.displayName}** <@${fatar.id}>!\n` +
-          `ابدأ الفتر على الفريق — كشف القبضات الآن!\n\n` +
-          `-# قل **سحب** لسحب قبضة، أو **صفق** لطلب التصفيق`,
-        )),
+        .addTextDisplayComponents(t => t.setContent(`### 🔍 المفتر هو **${fatar.displayName}** <@${fatar.id}>!\nابدأ الفتر — اختر لاعباً.`)),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
-
-  await sleep(2500);
+  await sleep(2000);
   return fatar;
 }
 
-// ─── مرحلة الفتر (المعدلة) ─────────────────────────────────────────────────
-//
-//  المفتر يختار اللاعب الذي يريد فتره بحرية من القائمة المتبقية.
-//  عند اختيار لاعب، تظهر له أزرار الإجراءات.
-//  إذا لم يختر لاعباً خلال 20 ثانية، يُختار لاعب عشوائي.
-//  بعد الإجراء، إذا كان "صفق" ناجحاً، يُحذف اللاعب من قائمة المشتبهين.
-//  تستمر الحلقة حتى نفاد القائمة أو حسم الجولة (سحب صحيح أو باتك).
-//
+// ─── مرحلة الفتر (محسّنة بالكامل) ───────────────────────────────────────
+
 async function runFatarPhase(context, fatar, guessingName, hidingTeam, hidingName, holder, state) {
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.pink)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🔍 بدأ الفتر!\n\n` +
-          `**${fatar.displayName}** <@${fatar.id}> يفتر على **${hidingName}**\n\n` +
-          `### قواعد الفتر:\n` +
-          `> 🤜 **سحب يمين / سحب يسار** — تسحب قبضة اللاعب\n` +
-          `>  ↳ إذا كان فيها المحبس = ✅ **فوز!**\n` +
-          `>  ↳ إذا كانت فارغة = ❌ **باتك** — يربح المخبي\n` +
-          `> 👏 **صفق** — تطلب من اللاعب التصفيق بيده/يديه\n` +
-          `>  ↳ إذا كانت فارغة = ✅ استمر للاعب التالي\n` +
-          `>  ↳ إذا كانت فيها المحبس = ❌ **باتك** — يربح المخبي\n\n` +
-          `-# ⏰ ${REAL_T_FATAR / 1000} ثانية لكل لاعب`,
+          `## 🔍 بدأ الفتر!\n**${fatar.displayName}** يفتر على **${hidingName}**\n\n` +
+          `> 🤜 سحب = تختار يد، 👏 صفق = تطلب التصفيق\n` +
+          `-# يمكنك الرجوع للقائمة بين اللاعبين`
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
+  await sleep(2000);
 
-  await sleep(3000);
+  // بناء قائمة المشتبه بهم مع حالة الأيدي
+  let suspected = hidingTeam.map(p => ({ player: p, revealed: [] })); // revealed: 'right'/'left'
+  const holderHand = state._holderHand;
 
-  // قائمة اللاعبين المتبقين (المشتبه بهم)
-  let remainingPlayers = [...hidingTeam];
+  while (suspected.length > 0) {
+    // عرض اللاعبين مع أيقونات مناسبة
+    const list = suspected.map(s => {
+      const r = s.revealed.includes('right') ? '🟢' : '✊';
+      const l = s.revealed.includes('left') ? '🟢' : '✊';
+      return `> ${r}${l} **${s.player.displayName}**`;
+    }).join('\n');
 
-  // اليد التي تحمل المحبس (تُحدد عشوائياً لحامل المحبس)
-  const holderHand = state._holderHand ?? (state._holderHand = Math.random() > 0.5 ? 'right' : 'left');
-
-  // حلقة الاختيار والإجراء
-  while (remainingPlayers.length > 0) {
-    // عرض قائمة المشتبه بهم وطلب اختيار واحد
-    const playerChoiceMsg = await context.channel.send({
-      components: [
-        new ContainerBuilder().setAccentColor(CLR.purple)
-          .addTextDisplayComponents(t => t.setContent(
-            `### 🎯 اختر لاعباً لتفتشه\n\n` +
-            `اللاعبون المتبقون (${remainingPlayers.length}):\n` +
-            remainingPlayers.map(p => `> ✊✊ **${p.displayName}**`).join('\n') +
-            `\n\n-# اختر لاعباً بالضغط على اسمه`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-    // أزرار اختيار اللاعب
-    const playerButtons = buildPlayerButtons(remainingPlayers, 'fatar_choose');
-    const chooseMsg = await context.channel.send({ components: playerButtons });
-
-    // انتظار اختيار لاعب (مع مهلة 20 ثانية)
-    const chosenPlayer = await new Promise(resolve => {
-      const col = chooseMsg.createMessageComponentCollector({
-        filter: i => i.customId.startsWith('fatar_choose_') && i.user.id === fatar.id,
-        time: 20_000, // 20 ثانية
-        max: 1,
-      });
-      col.on('collect', async i => {
-        const targetId = i.customId.replace('fatar_choose_', '');
-        const target = remainingPlayers.find(p => p.id === targetId);
-        await i.deferUpdate();
-        resolve(target || rnd(remainingPlayers));
-      });
-      col.on('end', collected => {
-        if (collected.size === 0) {
-          // لم يختر → اختيار عشوائي
-          resolve(rnd(remainingPlayers));
-        }
-      });
-    });
-
-    // تعطيل أزرار الاختيار
-    try {
-      await chooseMsg.edit({
-        components: playerButtons.map(row => {
-          row.components.forEach(b => b.setDisabled(true));
-          return row;
-        }),
-      });
-    } catch (_) {}
-
-    const target = chosenPlayer;
-    const isHolder = target.id === holder.id;
-
-    // إعلان الانتقال للاعب المختار
     await context.channel.send({
       components: [
         new ContainerBuilder().setAccentColor(CLR.purple)
-          .addTextDisplayComponents(t => t.setContent(
-            `### 🔎 يفتر الآن على **${target.displayName}** <@${target.id}>\n` +
-            `> ✊✊ القبضتان جاهزتان على الصدر\n` +
-            `-# ${isHolder ? '💍 هذا هو صاحب المحبس!' : '🤲 يداه فارغتان'}`,
-          )),
+          .addTextDisplayComponents(t => t.setContent(`### 🎯 اختر لاعباً لتفتشه\n${list}\n-# لديك 20 ثانية`)),
       ],
       flags: MessageFlags.IsComponentsV2,
     });
 
-    // أزرار الإجراء (سحب، صفق)
-    const actionRow1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`fatar_right_${target.id}`).setLabel('🤜 سحب يمين').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`fatar_left_${target.id}`).setLabel('🤛 سحب يسار').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(`fatar_clap_right_${target.id}`).setLabel('👏 صفق يمين').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`fatar_clap_left_${target.id}`).setLabel('👏 صفق يسار').setStyle(ButtonStyle.Primary),
+    const playerButtons = suspected.map(s =>
+      new ButtonBuilder().setCustomId(`fatar_choose_${s.player.id}`).setLabel(s.player.displayName).setStyle(ButtonStyle.Primary)
     );
-    const actionRow2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`fatar_clap_both_${target.id}`).setLabel('🙌 صفق الاثنين').setStyle(ButtonStyle.Secondary),
-    );
+    const rows = [];
+    for (let i = 0; i < playerButtons.length; i += 4) rows.push(new ActionRowBuilder().addComponents(playerButtons.slice(i, i + 4)));
+    const chooseMsg = await context.channel.send({ components: rows });
 
-    const actionMsg = await context.channel.send({ components: [actionRow1, actionRow2] });
-
-    // انتظار الإجراء
-    const action = await new Promise(resolve => {
-      const col = actionMsg.createMessageComponentCollector({
-        filter: i =>
-          (i.customId.startsWith('fatar_') && i.customId.endsWith(`_${target.id}`)) &&
-          i.user.id === fatar.id,
-        time: REAL_T_FATAR,
-        max: 1,
+    const chosenPlayer = await new Promise(resolve => {
+      const col = chooseMsg.createMessageComponentCollector({
+        filter: i => i.customId.startsWith('fatar_choose_') && i.user.id === fatar.id,
+        time: 20_000, max: 1,
       });
       col.on('collect', async i => {
+        const pid = i.customId.replace('fatar_choose_', '');
+        const target = suspected.find(s => s.player.id === pid);
         await i.deferUpdate();
-        const cid = i.customId;
-        if (cid.startsWith('fatar_right_'))       resolve({ type: 'pull', hand: 'right' });
-        else if (cid.startsWith('fatar_left_'))   resolve({ type: 'pull', hand: 'left' });
-        else if (cid.startsWith('fatar_clap_right_')) resolve({ type: 'clap', hand: 'right' });
-        else if (cid.startsWith('fatar_clap_left_'))  resolve({ type: 'clap', hand: 'left' });
-        else if (cid.startsWith('fatar_clap_both_'))  resolve({ type: 'clap', hand: 'both' });
-        else resolve({ type: 'timeout' });
+        resolve(target ? target.player : suspected[0].player);
       });
       col.on('end', collected => {
-        if (collected.size === 0) resolve({ type: 'timeout' });
+        if (collected.size === 0) resolve(suspected[Math.floor(Math.random() * suspected.length)].player);
       });
     });
 
-    // تعطيل أزرار الإجراء
-    try {
-      await actionMsg.edit({
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`d1`).setLabel('سحب يمين').setStyle(ButtonStyle.Danger).setDisabled(true),
-            new ButtonBuilder().setCustomId(`d2`).setLabel('سحب يسار').setStyle(ButtonStyle.Danger).setDisabled(true),
-            new ButtonBuilder().setCustomId(`d3`).setLabel('صفق يمين').setStyle(ButtonStyle.Primary).setDisabled(true),
-            new ButtonBuilder().setCustomId(`d4`).setLabel('صفق يسار').setStyle(ButtonStyle.Primary).setDisabled(true),
-          ),
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`d5`).setLabel('صفق الاثنين').setStyle(ButtonStyle.Secondary).setDisabled(true),
-          ),
-        ],
-      });
-    } catch (_) {}
+    try { await chooseMsg.edit({ components: rows.map(r => { r.components.forEach(b => b.setDisabled(true)); return r; }) }); } catch (_) {}
 
-    // معالجة النتيجة
-    if (action.type === 'timeout') {
-      // انتهى الوقت بدون إجراء -> يعتبر تخطي، يبقى اللاعب في القائمة (يمكن إعادة اختياره)
-      await context.channel.send({
-        components: [
-          new ContainerBuilder().setAccentColor(CLR.silver)
-            .addTextDisplayComponents(t => t.setContent(`⏰ انتهى وقت الإجراء على ${target.displayName} — يمكنك اختيار لاعب آخر.`)),
-        ],
-        flags: MessageFlags.IsComponentsV2,
+    const target = chosenPlayer;
+    const targetSusp = suspected.find(s => s.player.id === target.id);
+    const isHolder = target.id === holder.id;
+
+    // عرض الإجراءات مع مراعاة الأيدي المكشوفة
+    const availableActions = [];
+    if (!targetSusp.revealed.includes('right')) {
+      availableActions.push({ id: 'pull_right', label: '🤜 سحب يمين', style: ButtonStyle.Danger });
+      availableActions.push({ id: 'clap_right', label: '👏 صفق يمين', style: ButtonStyle.Primary });
+    }
+    if (!targetSusp.revealed.includes('left')) {
+      availableActions.push({ id: 'pull_left', label: '🤛 سحب يسار', style: ButtonStyle.Danger });
+      availableActions.push({ id: 'clap_left', label: '👏 صفق يسار', style: ButtonStyle.Primary });
+    }
+    if (!targetSusp.revealed.includes('right') && !targetSusp.revealed.includes('left')) {
+      availableActions.push({ id: 'clap_both', label: '🙌 صفق الاثنين', style: ButtonStyle.Secondary });
+    }
+    // زر رجوع
+    availableActions.push({ id: 'back', label: '🔙 رجوع للقائمة', style: ButtonStyle.Secondary });
+
+    const actionRows = [];
+    for (let i = 0; i < availableActions.length; i += 4) {
+      const row = new ActionRowBuilder();
+      availableActions.slice(i, i + 4).forEach(a => row.addComponents(
+        new ButtonBuilder().setCustomId(`fatar_act_${target.id}_${a.id}`).setLabel(a.label).setStyle(a.style)
+      ));
+      actionRows.push(row);
+    }
+
+    await context.channel.send({
+      components: [
+        new ContainerBuilder().setAccentColor(CLR.purple)
+          .addTextDisplayComponents(t => t.setContent(`### 🔎 يفتر على **${target.displayName}**`)),
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+    const actionMsg = await context.channel.send({ components: actionRows });
+
+    const action = await new Promise(resolve => {
+      const col = actionMsg.createMessageComponentCollector({
+        filter: i => i.customId.startsWith(`fatar_act_${target.id}_`) && i.user.id === fatar.id,
+        time: REAL_T_FATAR, max: 1,
       });
+      col.on('collect', async i => {
+        await i.deferUpdate();
+        resolve(i.customId.split('_').pop()); // action id
+      });
+      col.on('end', collected => {
+        if (collected.size === 0) resolve('timeout');
+      });
+    });
+
+    try { await actionMsg.edit({ components: actionRows.map(r => { r.components.forEach(b => b.setDisabled(true)); return r; }) }); } catch (_) {}
+
+    if (action === 'back' || action === 'timeout') {
+      // رجوع أو انتهاء وقت، لا يحدث شيء للاعب
       continue;
     }
 
-    if (action.type === 'pull') {
-      // سحب قبضة
-      if (isHolder) {
-        const pulled = (action.hand === holderHand);
-        if (pulled) {
-          // وجد المحبس
-          await context.channel.send({
-            components: [
-              new ContainerBuilder().setAccentColor(CLR.green)
-                .addTextDisplayComponents(t => t.setContent(
-                  `## 🎉 وجد المحبس!\n\n` +
-                  `**${fatar.displayName}** سحب يد **${target.displayName}** وكان فيها المحبس!\n\n` +
-                  `💍 **${guessingName}** يفوز بهذه الجولة! **+${REAL_PTS_WIN} نقطة**\n\n` +
-                  `-# باتك يا **${hidingName}**! 😅`,
-                )),
-            ],
-            flags: MessageFlags.IsComponentsV2,
-          });
-          delete state._holderHand;
-          return { success: true, fatar };
-        } else {
-          // باتك (اليد الأخرى فيها المحبس)
-          await context.channel.send({
-            components: [
-              new ContainerBuilder().setAccentColor(CLR.gold)
-                .addTextDisplayComponents(t => t.setContent(
-                  `## 🛡️ باتك!\n\n` +
-                  `**${fatar.displayName}** سحب اليد ${action.hand === 'right' ? 'اليمنى' : 'اليسرى'} لـ **${target.displayName}** وكانت فارغة!\n\n` +
-                  `> 💍 المحبس كان في يده الأخرى!\n\n` +
-                  `🏆 **${hidingName}** يفوز بهذه الجولة! **+${REAL_PTS_WIN} نقطة**\n\n` +
-                  `-# باتك يا **${guessingName}**! 😏`,
-                )),
-            ],
-            flags: MessageFlags.IsComponentsV2,
-          });
-          delete state._holderHand;
-          return { success: false, fatar };
-        }
+    // معالجة الإجراء
+    const hand = action.includes('right') ? 'right' : (action.includes('left') ? 'left' : null);
+    const type = action.startsWith('pull') ? 'pull' : (action.startsWith('clap') ? 'clap' : null);
+
+    if (type === 'pull') {
+      // سحب يد
+      if (isHolder && hand === holderHand) {
+        // وجد المحبس
+        await context.channel.send({
+          components: [
+            new ContainerBuilder().setAccentColor(CLR.green)
+              .addTextDisplayComponents(t => t.setContent(`## 🎉 وجد المحبس! فاز ${guessingName}!`)),
+          ],
+          flags: MessageFlags.IsComponentsV2,
+        });
+        return { success: true, fatar };
       } else {
-        // لاعب ليس معه المحبس -> باتك فوري
+        // باتك
         await context.channel.send({
           components: [
             new ContainerBuilder().setAccentColor(CLR.gold)
-              .addTextDisplayComponents(t => t.setContent(
-                `## 🛡️ باتك!\n\n` +
-                `**${fatar.displayName}** سحب يد **${target.displayName}** وكانت **فارغة**!\n\n` +
-                `🏆 **${hidingName}** يفوز بهذه الجولة! **+${REAL_PTS_WIN} نقطة**\n\n` +
-                `-# المحبس لم يكن هناك! 😏`,
-              )),
+              .addTextDisplayComponents(t => t.setContent(`## 🛡️ باتك! اليد فارغة. فاز ${hidingName}!`)),
           ],
           flags: MessageFlags.IsComponentsV2,
         });
-        delete state._holderHand;
         return { success: false, fatar };
       }
-    } // نهاية pull
-
-    if (action.type === 'clap') {
-      // طلب تصفيق
-      if (isHolder) {
-        const clapHit = (action.hand === holderHand || action.hand === 'both');
-        if (clapHit) {
-          // باتك
-          await context.channel.send({
-            components: [
-              new ContainerBuilder().setAccentColor(CLR.gold)
-                .addTextDisplayComponents(t => t.setContent(
-                  `## 🛡️ باتك!\n\n` +
-                  `**${fatar.displayName}** طلب تصفيق **${target.displayName}** — **المحبس كان في تلك اليد!**\n\n` +
-                  `🏆 **${hidingName}** يفوز بهذه الجولة! **+${REAL_PTS_WIN} نقطة**\n\n` +
-                  `-# كان يجب سحبها لا تصفيقها! 😅`,
-                )),
-            ],
-            flags: MessageFlags.IsComponentsV2,
-          });
-          delete state._holderHand;
-          return { success: false, fatar };
-        } else {
-          // صفق لليد الفارغة -> آمن، يُحذف اللاعب من المشتبهين
+    } else if (type === 'clap') {
+      // تصفيق
+      if (isHolder && (hand === holderHand || action === 'clap_both')) {
+        // باتك
+        await context.channel.send({
+          components: [
+            new ContainerBuilder().setAccentColor(CLR.gold)
+              .addTextDisplayComponents(t => t.setContent(`## 🛡️ باتك! المحبس كان في اليد. فاز ${hidingName}!`)),
+          ],
+          flags: MessageFlags.IsComponentsV2,
+        });
+        return { success: false, fatar };
+      } else {
+        // آمن: نكشف اليد/الأيدي
+        if (action === 'clap_both') {
+          // كشف الاثنين → تبرئة كاملة
+          suspected = suspected.filter(s => s.player.id !== target.id);
           await context.channel.send({
             components: [
               new ContainerBuilder().setAccentColor(CLR.blue)
-                .addTextDisplayComponents(t => t.setContent(
-                  `### 👏 ${target.displayName} صفّق!\n` +
-                  `> يده ${action.hand === 'right' ? 'اليمنى' : 'اليسرى'} فارغة ✅\n` +
-                  `-# تمت تبرئته — انتقل للاعبين الآخرين`,
-                )),
+                .addTextDisplayComponents(t => t.setContent(`👏 صفق الاثنين: ${target.displayName} بريء ✅`)),
             ],
             flags: MessageFlags.IsComponentsV2,
           });
-          // إزالة اللاعب من القائمة
-          remainingPlayers = remainingPlayers.filter(p => p.id !== target.id);
+        } else {
+          // كشف يد واحدة
+          if (!targetSusp.revealed.includes(hand)) targetSusp.revealed.push(hand);
+          await context.channel.send({
+            components: [
+              new ContainerBuilder().setAccentColor(CLR.blue)
+                .addTextDisplayComponents(t => t.setContent(`👏 صفق ${hand === 'right' ? 'يمين' : 'يسار'}: فارغة. لا يزال مشتبهاً.`)),
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
         }
-      } else {
-        // لاعب بدون المحبس -> صفق ناجح، يُحذف
-        await context.channel.send({
-          components: [
-            new ContainerBuilder().setAccentColor(CLR.blue)
-              .addTextDisplayComponents(t => t.setContent(
-                `### 👏 ${target.displayName} صفّق!\n` +
-                `> يداه فارغتان ✅\n` +
-                `-# تمت تبرئته`,
-              )),
-          ],
-          flags: MessageFlags.IsComponentsV2,
-        });
-        remainingPlayers = remainingPlayers.filter(p => p.id !== target.id);
       }
-    } // نهاية clap
-  } // نهاية while
+    }
 
-  // إذا وصلنا هنا، فقد نفدت القائمة بدون إيجاد المحبس -> باتك
+    // إذا تبقت أيادي مكشوفة فقط واللاعب ليس الحامل، يمكن إزالته تلقائياً؟ لا، يمكن أن يبقى لكن بلا إجراءات متاحة (سيتم عرضه بأيقونات خضراء). لكن لتجنب العبث، نزيله عندما تنكشف كلتا اليدين بدون المحبس.
+    if (targetSusp.revealed.includes('right') && targetSusp.revealed.includes('left')) {
+      suspected = suspected.filter(s => s.player.id !== target.id);
+    }
+  }
+
+  // إذا نفدت القائمة
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(CLR.gold)
-        .addTextDisplayComponents(t => t.setContent(
-          `## 🛡️ باتك! انتهى الفتر!\n\n` +
-          `**${fatar.displayName}** لم يستطع إيجاد المحبس بعد تفتيش الجميع!\n\n` +
-          `💍 المحبس كان عند **${holder.displayName}** <@${holder.id}> طوال الوقت!\n\n` +
-          `🏆 **${hidingName}** يفوز بهذه الجولة! **+${REAL_PTS_WIN} نقطة**`,
-        )),
+        .addTextDisplayComponents(t => t.setContent(`## 🛡️ باتك! لم يتم العثور على المحبس. فاز ${hidingName}!`)),
     ],
     flags: MessageFlags.IsComponentsV2,
   });
-
-  delete state._holderHand;
   return { success: false, fatar };
 }
 
-// ─── نتيجة جولة المحبس الحقيقي ───────────────────────────────────────────
+// ─── نتيجة جولة المحبس الحقيقي ─────────────────────────────────────────
 
 async function realRoundResult(context, state, fatarResult, hidingIdx, holder, hidingName, guessingName) {
   const { success } = fatarResult;
-
+  const pts = REAL_PTS_WIN;
   if (success) {
-    // المفتر وجد المحبس
-    if (hidingIdx === 0) state.scoreB += REAL_PTS_WIN;
-    else                 state.scoreA += REAL_PTS_WIN;
+    if (hidingIdx === 0) state.scoreB += pts;
+    else state.scoreA += pts;
   } else {
-    // فشل الفتر — نقاط للمخبين
-    if (hidingIdx === 0) state.scoreA += REAL_PTS_WIN;
-    else                 state.scoreB += REAL_PTS_WIN;
+    if (hidingIdx === 0) state.scoreA += pts;
+    else state.scoreB += pts;
   }
 
   await context.channel.send({
     components: [
       new ContainerBuilder().setAccentColor(success ? CLR.teal : CLR.pink)
         .addTextDisplayComponents(t => t.setContent(
-          `## 📊 النقاط بعد الجولة ${state.round}\n\n` +
+          `## 📊 النقاط بعد الجولة ${state.round}\n` +
           `> ${state.teamAName}: **${state.scoreA}** نقطة\n` +
-          `> ${state.teamBName}: **${state.scoreB}** نقطة\n\n` +
-          `-# ${state.totalRounds - state.round} جولات متبقية`,
+          `> ${state.teamBName}: **${state.scoreB}** نقطة\n` +
+          `-# ${state.totalRounds - state.round} جولات متبقية`
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
