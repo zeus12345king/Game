@@ -744,7 +744,6 @@ async function runClassicMode({ context, players, callback, category }) {
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
   const insiders    = players.filter((_, i) => i !== outsiderIdx);
-  // التعديل الوحيد: إشراك الجميع (بمن فيهم الجاسوس) في ترتيب التلميحات
   const order       = shuffle(players);
 
   // ══ إرسال سجل الحكم: بدء الوضع الكلاسيكي ══
@@ -912,7 +911,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
 
   await sleep(2000);
 
-  // جامع رسائل لرصد طلب التصويت بالنص
+  // جامع رسائل لرصد طلب التصويت بالنص - لا يقطع الجولة، فقط يسجل الطلب
   let voteRequestedByText = false;
   const textVoteCollector = context.channel.createMessageCollector({
     filter: m => !m.author.bot && players.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
@@ -927,6 +926,12 @@ async function runQuestionsMode({ context, players, callback, category }) {
   let currentAsker = players[Math.floor(Math.random() * players.length)];
 
   while (!voteRequested) {
+    // التحقق من طلب التصويت قبل بدء الجولة (إذا كان قد طُلب في الجولة السابقة)
+    if (voteRequestedByText) {
+      voteRequested = true;
+      break;
+    }
+
     const others = players.filter(p => p.id !== currentAsker.id);
     const target  = others[Math.floor(Math.random() * others.length)];
 
@@ -1236,12 +1241,12 @@ async function askDoubleStyle(context, hostId) {
 }
 
 async function runDoubleAgentMode({ context, players, callback, category }, style) {
-  // تحديد عدد الجواسيس
   const totalPlayers = players.length;
-  let spyCount = 2;
-  if (totalPlayers >= 8) spyCount = 3;
-  else if (totalPlayers >= 6) spyCount = 2;
-  else spyCount = 2; // مع 3-5 لاعبين يظل 2 جاسوسين
+  let spyCount;
+  if (totalPlayers <= 3) spyCount = 1;
+  else if (totalPlayers <= 5) spyCount = 1;
+  else if (totalPlayers <= 7) spyCount = 2;
+  else spyCount = 3; // 8-10
 
   // التأكد من وجود لاعبين مجموعة
   if (spyCount >= totalPlayers) spyCount = Math.max(1, totalPlayers - 1);
@@ -1254,12 +1259,15 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
   let remainingSpies = [...allSpies];
   let round = 0;
   let gameEnded = false;
-  let doHintRound = true; // البداية بجولة تلميحات/أسئلة
+  let doHintRound = true;
 
   const HINT_TIME = 35_000;
   const VOTE_TIME = 25_000;
   const ANSWER_TIME = 50_000;
   const MIN_ROUNDS = 4;
+
+  // ══ سجل الحكم: بدء وضع الجواسيس المتعددين ══
+  await sendJudgeDM(context.client, `🕵️‍♂️ وضع الجواسيس المتعددين (${style}):\n- عدد الجواسيس: ${spyCount}\n- الجواسيس: ${allSpies.map(s => s.displayName).join(', ')}\n- المجموعة: ${allInnocents.map(p => p.displayName).join(', ')}`);
 
   while (!gameEnded) {
     if (doHintRound) {
@@ -1275,6 +1283,9 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
             : `✅ **أنت من المجموعة!**\nالكلمة السرية: **${word}**\nلمّح لها دون ذكرها مباشرة.`
         );
       }
+
+      // ══ سجل الحكم: بدء الجولة ══
+      await sendJudgeDM(context.client, `🔄 الجولة ${round}:\n- الكلمة: ${word}\n- المتبقون: ${remainingPlayers.map(p => p.displayName).join(', ')}`);
 
       await context.channel.send({
         components: [
@@ -1328,19 +1339,35 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
           ],
           flags: MessageFlags.IsComponentsV2,
         });
+
+        // ══ سجل الحكم: التلميحات ══
+        const hintsLog = hints.map(h => `${h.player.displayName}: ${h.hint ?? 'لم يكتب'}`).join('\n');
+        await sendJudgeDM(context.client, `📋 تلميحات الجولة ${round}:\n${hintsLog}`);
+
         await sleep(2000);
       } else {
-        // أسئلة مبسطة
+        // أسلوب الأسئلة - مطابق لوضع الأسئلة العادي
         let qRounds = 0;
         let voteRequested = false;
         let currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
 
+        // جامع طلب التصويت بالنص - لا يقطع الجولة
+        let voteRequestedByText = false;
         const textVoteCollector = context.channel.createMessageCollector({
           filter: m => !m.author.bot && remainingPlayers.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
         });
-        textVoteCollector.on('collect', () => { voteRequested = true; textVoteCollector.stop(); });
+        textVoteCollector.on('collect', () => {
+          voteRequestedByText = true;
+          textVoteCollector.stop();
+        });
 
         while (!voteRequested && qRounds < MIN_ROUNDS + 10) {
+          // التحقق من طلب التصويت قبل بدء الجولة
+          if (voteRequestedByText) {
+            voteRequested = true;
+            break;
+          }
+
           const others = remainingPlayers.filter(p => p.id !== currentAsker.id);
           const target = others[Math.floor(Math.random() * others.length)];
 
@@ -1384,17 +1411,83 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
               flags: MessageFlags.IsComponentsV2,
             });
           }
-          currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+
+          if (qRounds >= MIN_ROUNDS) {
+            const chooseRow = new ActionRowBuilder();
+            const selectablePlayers = remainingPlayers.filter(p => p.id !== target.id);
+            selectablePlayers.slice(0, 4).forEach(p => {
+              chooseRow.addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`next_${p.id}`)
+                  .setLabel(p.displayName.substring(0, 40))
+                  .setStyle(ButtonStyle.Secondary),
+              );
+            });
+            const controlRow = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('request_vote').setLabel('🗳️ طلب تصويت').setStyle(ButtonStyle.Danger),
+            );
+
+            const chooseMsg = await context.channel.send({
+              components: [
+                new ContainerBuilder()
+                  .setAccentColor(0x9B59B6)
+                  .addTextDisplayComponents(t => t.setContent(
+                    `### 🎯 <@${target.id}> — اختر التالي!\n` +
+                    `من تريد توجيه السؤال له؟\n` +
+                    `-# يمكنك طلب تصويت (مرت ${qRounds} جولات)`,
+                  ))
+                  .addActionRowComponents(r => r.setComponents(...chooseRow.components))
+                  .addActionRowComponents(r => r.setComponents(...controlRow.components)),
+              ],
+              flags: MessageFlags.IsComponentsV2,
+            });
+
+            const choice = await new Promise(resolve => {
+              const colChoice = chooseMsg.createMessageComponentCollector({
+                filter: i => i.user.id === target.id,
+                time: 20_000,
+                max: 1,
+              });
+              colChoice.on('collect', i => {
+                i.deferUpdate().catch(() => {});
+                resolve(i.customId);
+              });
+              colChoice.on('end', c => { if (c.size === 0) resolve(null); });
+            });
+
+            if (choice === 'request_vote' || choice === null) {
+              voteRequested = true;
+            } else {
+              const nextId = choice.replace('next_', '');
+              currentAsker = remainingPlayers.find(p => p.id === nextId) ?? target;
+            }
+
+            try { await chooseMsg.delete(); } catch (_) {}
+          } else {
+            currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+            await context.channel.send({
+              components: [
+                new ContainerBuilder()
+                  .setAccentColor(0x2C3E50)
+                  .addTextDisplayComponents(t => t.setContent(
+                    `-# 🤖 البوت اختار: <@${currentAsker.id}> سيسأل التالي`,
+                  )),
+              ],
+              flags: MessageFlags.IsComponentsV2,
+            });
+          }
+
+          if (voteRequestedByText) voteRequested = true;
         }
+
         try { textVoteCollector.stop(); } catch (_) {}
       }
-      doHintRound = false; // بعد التلميحات ننتقل للتصويت
+      doHintRound = false;
     }
 
     // مرحلة التصويت (إقصاء واحد)
     const voteResult = await runDoubleVotePhase(context, remainingPlayers, VOTE_TIME);
     if (!voteResult) {
-      // لا أصوات، ننهي اللعبة تعسفياً
       gameEnded = true;
       break;
     }
@@ -1403,7 +1496,9 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
     const eliminatedPlayer = remainingPlayers.find(p => p.id === eliminatedId);
     const wasSpy = remainingSpies.some(s => s.id === eliminatedId);
 
-    // إزالة اللاعب من القوائم
+    // ══ سجل الحكم: نتيجة التصويت ══
+    await sendJudgeDM(context.client, `🗳️ تصويت الجولة ${round}: أُقصي <@${eliminatedPlayer.id}> (${wasSpy ? 'جاسوس' : 'من المجموعة'})`);
+
     remainingPlayers = remainingPlayers.filter(p => p.id !== eliminatedId);
     if (wasSpy) {
       remainingSpies = remainingSpies.filter(s => s.id !== eliminatedId);
@@ -1421,7 +1516,6 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
       flags: MessageFlags.IsComponentsV2,
     });
 
-    // التحقق من شروط النهاية
     const remainingInnocentsCount = remainingPlayers.length - remainingSpies.length;
     if (remainingSpies.length === 0) {
       await endDoubleGame(context, 'group', allSpies, allInnocents, players, callback);
@@ -1434,12 +1528,11 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
       break;
     }
 
-    // تصويت اللاعبين المتبقين على الإجراء التالي
     const action = await askDoubleAction(context, remainingPlayers);
     if (action === 'new_round') {
-      doHintRound = true;  // جولة تلميحات جديدة
+      doHintRound = true;
     } else {
-      doHintRound = false; // تصويت مباشر بدون تلميحات
+      doHintRound = false;
     }
   }
 
