@@ -15,7 +15,7 @@ const config = require('../config.js');
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 
 const mafiaConfig = {
-  MIN_PLAYERS: 5,
+  MIN_PLAYERS: 3,
   MAX_PLAYERS: 20,
   TIME_TO_START: config.lobbyTime.mafia,
 };
