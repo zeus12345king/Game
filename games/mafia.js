@@ -717,11 +717,26 @@ async function drawGame(context, allPlayers, type, winnerType) {
     const citizenPlayers = allPlayers.filter(p => p.role === "citizen");
     const doctorPlayers = allPlayers.filter(p => p.role === "doctor");
 
-    const mafiaIconW = 22, mafiaIconH = 43, iconGap = 9, iconsPerRow = 5;
-    const containerW = 194, mafiaContainerX = 88, mafiaContainerY = 150;
-    const citizenContainerX = 345, citizenContainerY = 150;
-    const citizenIconW = 27, citizenIconH = 43;
-    const doctorIconW = 27, doctorIconH = 43;
+    // تكبير الأبعاد والتباعد
+const scale = 1.8;
+const mafiaIconW = 22 * scale,   // 39.6
+      mafiaIconH = 43 * scale;   // 77.4
+const citizenIconW = 27 * scale, // 48.6
+      citizenIconH = 43 * scale; // 77.4
+const doctorIconW = 27 * scale,  // 48.6
+      doctorIconH = 43 * scale;  // 77.4
+const iconGap = 9 * scale;       // 16.2
+const iconsPerRow = 5;
+
+// إعادة حساب عرض الحاوية لتناسب الأيقونات الكبيرة
+const containerW = (mafiaIconW * iconsPerRow) + (iconGap * (iconsPerRow - 1));
+// = 39.6*5 + 16.2*4 = 198 + 64.8 = 262.8
+
+// تحريك الحاويات إلى اليسار والاعلى (مثلاً -15 بكسل أفقياً، -10 عمودياً)
+const mafiaContainerX = 88 - 15,   // 73
+      mafiaContainerY = 150 - 10;  // 140
+const citizenContainerX = 345 - 15, // 330
+      citizenContainerY = 150 - 10; // 140
 
     // دالة مساعدة لرسم أيقونة أو دائرة احتياطية إذا كانت الأيقونة null
     const drawRoleIcon = (icon, x, y, w, h, roleLetter, color) => {
