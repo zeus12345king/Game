@@ -717,29 +717,26 @@ async function drawGame(context, allPlayers, type, winnerType) {
     const citizenPlayers = allPlayers.filter(p => p.role === "citizen");
     const doctorPlayers = allPlayers.filter(p => p.role === "doctor");
 
-// تصغير الحجم بنسبة 20% (أي 0.8 من القيم الأصلية)
-const scale = 0.8;
-const mafiaIconW = 22 * scale,   // 17.6
-      mafiaIconH = 43 * scale;   // 34.4
-const citizenIconW = 27 * scale, // 21.6
-      citizenIconH = 43 * scale; // 34.4
-const doctorIconW = 27 * scale,  // 21.6
-      doctorIconH = 43 * scale;  // 34.4
-const iconGap = 9 * scale;       // 7.2
+// تصغير الأبعاد والتباعد بنسبة 20% (المقياس الأصلي 1.8 أصبح 1.44)
+const scale = 1.44;
+const mafiaIconW = 22 * scale,      // 31.68
+      mafiaIconH = 43 * scale;      // 61.92
+const citizenIconW = 27 * scale,    // 38.88
+      citizenIconH = 43 * scale;    // 61.92
+const doctorIconW = 27 * scale,     // 38.88
+      doctorIconH = 43 * scale;     // 61.92
+const iconGap = 9 * scale;          // 12.96
 const iconsPerRow = 5;
 
-// إعادة حساب عرض الحاوية
+// عرض الحاوية بعد التصغير
 const containerW = (mafiaIconW * iconsPerRow) + (iconGap * (iconsPerRow - 1));
-// = 17.6*5 + 7.2*4 = 88 + 28.8 = 116.8
+// = 31.68*5 + 12.96*4 = 158.4 + 51.84 = 210.24
 
-// تحريك إلى اليمين (زيادة X) وإلى الأعلى (نقصان Y)
-const offsetX = 20;   // كم بكسل إلى اليمين
-const offsetY = -10;  // كم بكسل إلى الأعلى (قيمة سالبة)
-
-const mafiaContainerX = 88 + offsetX,   // 108
-      mafiaContainerY = 150 + offsetY;  // 140
-const citizenContainerX = 345 + offsetX, // 365
-      citizenContainerY = 150 + offsetY; // 140
+// تحريك الحاويات إلى اليمين والأعلى (إضافة 15 أفقياً، طرح 10 عمودياً)
+const mafiaContainerX = 88 + 15,    // 103
+      mafiaContainerY = 150 - 10;   // 140
+const citizenContainerX = 345 + 15, // 360
+      citizenContainerY = 150 - 10; // 140
 
     // دالة مساعدة لرسم أيقونة أو دائرة احتياطية إذا كانت الأيقونة null
     const drawRoleIcon = (icon, x, y, w, h, roleLetter, color) => {
