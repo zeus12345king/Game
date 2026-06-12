@@ -37,47 +37,6 @@ const DOCTOR_ICON = path.join(__dirname, "../img/mafia/doctor.png");
 const MAFIA_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 const CITIZEN_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 
-// --- دالة جديدة لإنشاء صورة اللوبي مع أيقونات محايدة ---
-async function generateLobbyImage(players) {
-  const canvas = createCanvas(626, 339);
-  const ctx = canvas.getContext("2d");
-
-  const loadImg = async (filePath) => {
-    try { return await loadImage(filePath); } catch (e) { return null; }
-  };
-
-  const banner = await loadImg(ROUND_BANNER);
-  if (banner) ctx.drawImage(banner, 0, 0, 626, 339);
-  else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
-
-  // نستخدم أيقونة المواطن كلاعب محايد في اللوبي
-  const citizenIcon = await loadImg(CITIZEN_ICON);
-  if (!citizenIcon) return canvas.toBuffer("image/png");
-
-  const iconWidth = 27, iconHeight = 43, iconGap = 9, iconsPerRow = 5;
-  const containerWidth = 194;
-  // سنرسم كل اللاعبين في حاوية واحدة (وسط الصورة مثلاً) أو نوزعهم عشوائياً
-  // سأضعهم في منتصف المساحة السفلية
-  const totalPlayers = players.length;
-  if (totalPlayers === 0) return canvas.toBuffer("image/png");
-
-  // حساب صف واحد أو أكثر
-  const rows = Math.ceil(totalPlayers / iconsPerRow);
-  const startX = (626 - (Math.min(iconsPerRow, totalPlayers) * iconWidth + (Math.min(iconsPerRow, totalPlayers) - 1) * iconGap)) / 2;
-  const startY = 180;
-
-  players.forEach((player, index) => {
-    const row = Math.floor(index / iconsPerRow);
-    const col = index % iconsPerRow;
-    const x = startX + col * (iconWidth + iconGap);
-    const y = startY + row * (iconHeight + iconGap);
-    ctx.drawImage(citizenIcon, x, y, iconWidth, iconHeight);
-  });
-
-  return canvas.toBuffer("image/png");
-}
-// -----------------------------------------------------
-
 function buildMafiaLobby(nowTime, players) {
   const list = players.length ? players.map((p, i) => `> **${i + 1}.** <@${p.id}>`).join('\n') : '> لا يوجد لاعبين بعد';
   return new ContainerBuilder()
@@ -86,6 +45,7 @@ function buildMafiaLobby(nowTime, players) {
       `## 🕵️ لعبة المافيا\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
       `**اللاعبون (${players.length}/${MAX_PLAYERS}):**\n${list}`
     ))
+    .addMediaGalleryComponents(g => { const img = config.lobbyImages.mafia; if (img) g.addItems(item => item.setURL(img)); return g; })
     .addActionRowComponents(r => r.setComponents(
       new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Danger)
@@ -98,7 +58,35 @@ let players = [];
 module.exports = {
   name: 'mafia',
   aliases: ["مافيا"],
+  /**
+   * @param {import('discord.js').Message} message
+   * @param {string[]} args
+   * @param {function} callback
+   */
   async execute(message, args, callback) {
+    // أمر الاختبار السريع لمعاينة الصور
+    if (args[0] === 'اختبار') {
+      const fakePlayers = [
+        { id: '1', displayName: 'لاعب1', avatarURL: 'https://cdn.discordapp.com/embed/avatars/0.png', role: 'mafia', voteCount: 0, takeVote: false },
+        { id: '2', displayName: 'لاعب2', avatarURL: 'https://cdn.discordapp.com/embed/avatars/1.png', role: 'mafia', voteCount: 0, takeVote: false },
+        { id: '3', displayName: 'لاعب3', avatarURL: 'https://cdn.discordapp.com/embed/avatars/2.png', role: 'citizen', voteCount: 0, takeVote: false },
+        { id: '4', displayName: 'لاعب4', avatarURL: 'https://cdn.discordapp.com/embed/avatars/3.png', role: 'citizen', voteCount: 0, takeVote: false },
+        { id: '5', displayName: 'لاعب5', avatarURL: 'https://cdn.discordapp.com/embed/avatars/4.png', role: 'doctor', voteCount: 0, takeVote: false },
+      ];
+
+      const startImg = await drawGame(message, fakePlayers, 'start');
+      await message.channel.send({ content: '🖼️ اختبار صورة البداية', files: [startImg] });
+
+      const mafiaWin = await drawGame(message, fakePlayers, 'end', 'mafia');
+      await message.channel.send({ content: '🖼️ اختبار فوز المافيا', files: [mafiaWin] });
+
+      const citizenWin = await drawGame(message, fakePlayers, 'end', 'citizen');
+      await message.channel.send({ content: '🖼️ اختبار فوز المواطنين', files: [citizenWin] });
+
+      callback();
+      return;
+    }
+
     if (GAME_ACTIVE) {
       message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء ار حتى انتهاء اللعبة الحالية.**`);
       callback();
@@ -145,13 +133,8 @@ async function startGame(context, nowTime, callback) {
 
   let sentMessage;
   try {
-    // توليد صورة اللوبي الأولية (فارغة)
-    const initialBuffer = await generateLobbyImage(players);
-    const lobbyAttachment = new AttachmentBuilder(initialBuffer, { name: "lobby.png" });
-
     sentMessage = await context.reply({
       components: [buildMafiaLobby(nowTime, players)],
-      files: [lobbyAttachment],
       flags: MessageFlags.IsComponentsV2,
       fetchReply: true,
     });
@@ -180,14 +163,7 @@ async function startGame(context, nowTime, callback) {
               voteCount: 0,
               takeVote: false,
             });
-            // تحديث الصورة والمكونات
-            const newBuffer = await generateLobbyImage(players);
-            const newAttachment = new AttachmentBuilder(newBuffer, { name: "lobby.png" });
-            await i.update({
-              components: [buildMafiaLobby(nowTime, players)],
-              files: [newAttachment],
-              flags: MessageFlags.IsComponentsV2
-            });
+            await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
           } else {
             await i.reply({ content: `أنت بالفعل في اللعبة! 🚫`, ephemeral: true });
           }
@@ -198,13 +174,7 @@ async function startGame(context, nowTime, callback) {
         const playerExists = players.some((player) => player.id === i.user.id);
         if (playerExists) {
           players = players.filter((player) => player.id !== i.user.id);
-          const newBuffer = await generateLobbyImage(players);
-          const newAttachment = new AttachmentBuilder(newBuffer, { name: "lobby.png" });
-          await i.update({
-            components: [buildMafiaLobby(nowTime, players)],
-            files: [newAttachment],
-            flags: MessageFlags.IsComponentsV2
-          });
+          await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
         } else {
           await i.reply({ content: `لم تكن في اللعبة. ❓`, ephemeral: true });
         }
@@ -736,54 +706,73 @@ async function drawGame(context, allPlayers, type, winnerType) {
 
   if (type === "start") {
     const banner = await loadImg(ROUND_BANNER);
-    if(banner) ctx.drawImage(banner, 0, 0, 626, 339);
+    if (banner) ctx.drawImage(banner, 0, 0, 626, 339);
     else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
 
     const mafiaIcon = await loadImg(MAFIA_ICON);
     const citizenIcon = await loadImg(CITIZEN_ICON);
     const doctorIcon = await loadImg(DOCTOR_ICON);
 
-    const mafiaPlayers = allPlayers.filter((p) => p.role === "mafia");
-    const citizenPlayers = allPlayers.filter((p) => p.role === "citizen");
-    const doctorPlayers = allPlayers.filter((p) => p.role === "doctor");
+    const mafiaPlayers = allPlayers.filter(p => p.role === "mafia");
+    const citizenPlayers = allPlayers.filter(p => p.role === "citizen");
+    const doctorPlayers = allPlayers.filter(p => p.role === "doctor");
 
-    const mafiaIconWidth = 22, mafiaIconHeight = 43, iconGap = 9, iconsPerRow = 5;
-    const mafiaContainerWidth = 194, mafiaContainerX = 88, mafiaContainerY = 150;
+    const mafiaIconW = 22, mafiaIconH = 43, iconGap = 9, iconsPerRow = 5;
+    const containerW = 194, mafiaContainerX = 88, mafiaContainerY = 150;
+    const citizenContainerX = 345, citizenContainerY = 150;
+    const citizenIconW = 27, citizenIconH = 43;
+    const doctorIconW = 27, doctorIconH = 43;
 
-    const drawIcons = (icon, players, cX, cY, cW, iW, iH) => {
-      if (!icon) return;
-      players.forEach((player, index) => {
-        const row = Math.floor(index / iconsPerRow);
-        const col = index % iconsPerRow;
-        const xOffset = cX + (cW - (iconsPerRow * iW + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (iW + iconGap);
-        const yPos = cY + row * (iH + iconGap);
-        ctx.drawImage(icon, xPos, yPos, iW, iH);
-      });
+    // دالة مساعدة لرسم أيقونة أو دائرة احتياطية إذا كانت الأيقونة null
+    const drawRoleIcon = (icon, x, y, w, h, roleLetter, color) => {
+      if (icon) {
+        ctx.drawImage(icon, x, y, w, h);
+      } else {
+        // رسم دائرة ملونة بداخلها حرف
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `bold ${Math.min(w, h) * 0.6}px "IBM", sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(roleLetter, x + w/2, y + h/2);
+        ctx.restore();
+      }
     };
 
-    drawIcons(mafiaIcon, mafiaPlayers, mafiaContainerX, mafiaContainerY, mafiaContainerWidth, mafiaIconWidth, mafiaIconHeight);
-
-    const citizenIconWidth = 27, iconHeight = 43;
-    const citizenContainerX = 345, citizenContainerY = 150;
-
-    if(citizenIcon) citizenPlayers.forEach((player, index) => {
-        const row = Math.floor(index / iconsPerRow);
-        const col = index % iconsPerRow;
-        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * citizenIconWidth + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (citizenIconWidth + iconGap);
-        const yPos = citizenContainerY + row * (iconHeight + iconGap);
-        ctx.drawImage(citizenIcon, xPos, yPos, citizenIconWidth, iconHeight);
+    // رسم المافيا
+    mafiaPlayers.forEach((p, index) => {
+      const row = Math.floor(index / iconsPerRow);
+      const col = index % iconsPerRow;
+      const xOffset = mafiaContainerX + (containerW - (iconsPerRow * mafiaIconW + (iconsPerRow - 1) * iconGap)) / 2;
+      const xPos = xOffset + col * (mafiaIconW + iconGap);
+      const yPos = mafiaContainerY + row * (mafiaIconH + iconGap);
+      drawRoleIcon(mafiaIcon, xPos, yPos, mafiaIconW, mafiaIconH, "M", "#e74c3c");
     });
 
-    if(doctorIcon) doctorPlayers.forEach((player, index) => {
-        const citizenIdx = citizenPlayers.length + index;
-        const row = Math.floor(citizenIdx / iconsPerRow);
-        const col = citizenIdx % iconsPerRow;
-        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * citizenIconWidth + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (citizenIconWidth + iconGap);
-        const yPos = citizenContainerY + row * (iconHeight + iconGap);
-        ctx.drawImage(doctorIcon, xPos, yPos, citizenIconWidth, iconHeight);
+    // رسم المواطنين
+    citizenPlayers.forEach((p, index) => {
+      const row = Math.floor(index / iconsPerRow);
+      const col = index % iconsPerRow;
+      const xOffset = citizenContainerX + (containerW - (iconsPerRow * citizenIconW + (iconsPerRow - 1) * iconGap)) / 2;
+      const xPos = xOffset + col * (citizenIconW + iconGap);
+      const yPos = citizenContainerY + row * (citizenIconH + iconGap);
+      drawRoleIcon(citizenIcon, xPos, yPos, citizenIconW, citizenIconH, "C", "#3498db");
+    });
+
+    // رسم الطبيب (يُضاف بعد المواطنين)
+    const allCitizenCount = citizenPlayers.length;
+    doctorPlayers.forEach((p, index) => {
+      const globalIndex = allCitizenCount + index;
+      const row = Math.floor(globalIndex / iconsPerRow);
+      const col = globalIndex % iconsPerRow;
+      const xOffset = citizenContainerX + (containerW - (iconsPerRow * doctorIconW + (iconsPerRow - 1) * iconGap)) / 2;
+      const xPos = xOffset + col * (doctorIconW + iconGap);
+      const yPos = citizenContainerY + row * (doctorIconH + iconGap);
+      drawRoleIcon(doctorIcon, xPos, yPos, doctorIconW, doctorIconH, "D", "#2ecc71");
     });
 
   } else if (type === "end") {
@@ -791,46 +780,44 @@ async function drawGame(context, allPlayers, type, winnerType) {
     if (winnerType === "mafia") winBanner = await loadImg(MAFIA_WIN_BANNER);
     else winBanner = await loadImg(CITIZEN_WIN_BANNER);
 
-    if(winBanner) ctx.drawImage(winBanner, 0, 0, 626, 339);
+    if (winBanner) ctx.drawImage(winBanner, 0, 0, 626, 339);
     else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
 
     const avatarSize = 30, avatarGap = 9, iconsPerRow = 5;
-    const mafiaContainerWidth = 194, mafiaContainerX = 88, mafiaContainerY = 150;
+    const mafiaContainerW = 194, mafiaContainerX = 88, mafiaContainerY = 150;
     const citizenContainerX = 345, citizenContainerY = 150;
 
-    const mafiaPlayers = allPlayers.filter((p) => p.role === "mafia");
-    const citizenAndDoctorPlayers = allPlayers.filter((p) => p.role === "citizen" || p.role === "doctor");
+    const mafiaPlayers = allPlayers.filter(p => p.role === "mafia");
+    const citizenAndDoctor = allPlayers.filter(p => p.role === "citizen" || p.role === "doctor");
 
     const fallbackAvatar = await loadImg("https://cdn.discordapp.com/embed/avatars/0.png");
 
     const mafiaAvatars = await Promise.all(mafiaPlayers.map(p => loadImg(p.avatarURL).catch(e => fallbackAvatar)));
-    const citizenAndDoctorAvatars = await Promise.all(citizenAndDoctorPlayers.map(p => loadImg(p.avatarURL).catch(e => fallbackAvatar)));
+    const citizenDocAvatars = await Promise.all(citizenAndDoctor.map(p => loadImg(p.avatarURL).catch(e => fallbackAvatar)));
 
     mafiaAvatars.forEach((avatar, index) => {
       const row = Math.floor(index / iconsPerRow);
       const col = index % iconsPerRow;
-      const xOffset = mafiaContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
+      const xOffset = mafiaContainerX + (mafiaContainerW - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
       const xPos = xOffset + col * (avatarSize + avatarGap);
       const yPos = mafiaContainerY + row * (avatarSize + avatarGap);
-
       ctx.save();
       ctx.beginPath();
-      ctx.arc(xPos + avatarSize / 2, yPos + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.arc(xPos + avatarSize/2, yPos + avatarSize/2, avatarSize/2, 0, Math.PI*2);
       ctx.clip();
       ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize, avatarSize);
       ctx.restore();
     });
 
-    citizenAndDoctorAvatars.forEach((avatar, index) => {
+    citizenDocAvatars.forEach((avatar, index) => {
       const row = Math.floor(index / iconsPerRow);
       const col = index % iconsPerRow;
-      const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
+      const xOffset = citizenContainerX + (mafiaContainerW - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
       const xPos = xOffset + col * (avatarSize + avatarGap);
       const yPos = citizenContainerY + row * (avatarSize + avatarGap);
-
       ctx.save();
       ctx.beginPath();
-      ctx.arc(xPos + avatarSize / 2, yPos + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.arc(xPos + avatarSize/2, yPos + avatarSize/2, avatarSize/2, 0, Math.PI*2);
       ctx.clip();
       ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize, avatarSize);
       ctx.restore();
