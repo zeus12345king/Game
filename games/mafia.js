@@ -735,7 +735,7 @@ const containerW = (mafiaIconW * iconsPerRow) + (iconGap * (iconsPerRow - 1));
 // رفع الأيقونات إلى الأعلى بمقدار 4 درجات (4 وحدات)
 const raiseAmount = 60;
 const baseY = 150;
-const mafiaContainerX = 88,                // الموقع الأفقي الأصلي
+const mafiaContainerX = 120,                // الموقع الأفقي الأصلي
       mafiaContainerY = baseY - raiseAmount;   // 146
 const citizenContainerX = 400,             // الموقع الأفقي الأصلي
       citizenContainerY = baseY - raiseAmount; // 146
