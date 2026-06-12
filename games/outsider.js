@@ -250,6 +250,12 @@ async function runLobby(context, callback) {
           .setValue('mission')
           .setEmoji('💣')
           .setDefault(currentMode === 'mission'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('الجواسيس المتعددين')
+          .setDescription('جاسوسان أو أكثر يتخفون — إقصاءات متعددة')
+          .setValue('double')
+          .setEmoji('🕵️‍♂️')
+          .setDefault(currentMode === 'double'),
       );
     rows.push(new ActionRowBuilder().addComponents(modeSelect));
 
@@ -353,6 +359,12 @@ async function runLobby(context, callback) {
     const opts = { context, players, callback };
     if      (currentMode === 'questions') await runQuestionsMode(opts);
     else if (currentMode === 'mission')   await runMissionMode(opts);
+    else if (currentMode === 'double') {
+      // طلب اختيار أسلوب اللعب من المضيف
+      await context.channel.send('<:z3:1511872921142825040> | اختر أسلوب لعب الجواسيس المتعددين:');
+      const subMode = await askDoubleStyle(context, hostId);
+      await runDoubleAgentMode(opts, subMode);
+    }
     else                                   await runClassicMode(opts);
   });
 }
@@ -815,6 +827,401 @@ async function runMissionMode({ context, players, callback }) {
   }
 
   await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'mission', mission, callback });
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  🕵️‍♂️  وضع الجواسيس المتعددين (الإقصاءات المتعددة)
+// ════════════════════════════════════════════════════════════════════
+
+async function askDoubleStyle(context, hostId) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('double_style')
+    .setPlaceholder('اختر طريقة لعب الجواسيس المتعددين')
+    .addOptions(
+      new StringSelectMenuOptionBuilder()
+        .setLabel('الكلاسيكي')
+        .setDescription('تلميحات ثم تصويت')
+        .setValue('classic')
+        .setEmoji('🎯'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('الأسئلة')
+        .setDescription('أسئلة متبادلة ثم تصويت')
+        .setValue('questions')
+        .setEmoji('❓'),
+    );
+
+  const row = new ActionRowBuilder().addComponents(menu);
+  const msg = await context.channel.send({
+    content: `<@${hostId}>، اختر أسلوب اللعب:`,
+    components: [row],
+    fetchReply: true,
+  });
+
+  try {
+    const choice = await msg.awaitMessageComponent({
+      filter: i => i.user.id === hostId && i.customId === 'double_style',
+      time: 30_000,
+    });
+    await choice.deferUpdate();
+    await msg.delete().catch(() => {});
+    return choice.values[0];
+  } catch {
+    await msg.delete().catch(() => {});
+    return 'classic'; // افتراضي
+  }
+}
+
+async function runDoubleAgentMode({ context, players, callback }, style) {
+  // تحديد عدد الجواسيس
+  const totalPlayers = players.length;
+  let spyCount = 2;
+  if (totalPlayers >= 8) spyCount = 3;
+  else if (totalPlayers >= 6) spyCount = 2;
+  else spyCount = 2; // مع 3-5 لاعبين يظل 2 جاسوسين
+
+  // التأكد من وجود لاعبين مجموعة
+  if (spyCount >= totalPlayers) spyCount = Math.max(1, totalPlayers - 1);
+
+  const shuffledAll = shuffle(players);
+  const allSpies = shuffledAll.slice(0, spyCount);
+  const allInnocents = shuffledAll.slice(spyCount);
+
+  let remainingPlayers = [...players];
+  let remainingSpies = [...allSpies];
+  let round = 0;
+  let gameEnded = false;
+  let doHintRound = true; // البداية بجولة تلميحات/أسئلة
+
+  const HINT_TIME = 35_000;
+  const VOTE_TIME = 25_000;
+  const ANSWER_TIME = 50_000;
+  const MIN_ROUNDS = 4;
+
+  while (!gameEnded) {
+    if (doHintRound) {
+      round++;
+      const word = randomWord();
+
+      // إرسال الأدوار سراً للمتبقين
+      for (const player of remainingPlayers) {
+        const isSpy = remainingSpies.some(s => s.id === player.id);
+        await sendDM(context.client, player,
+          isSpy
+            ? `🕵️‍♂️ **أنت جاسوس!**\nعدد الجواسيس الإجمالي: ${spyCount}\nحاول التخفي وتضليل المجموعة.\nلا تعرف الكلمة السرية!`
+            : `✅ **أنت من المجموعة!**\nالكلمة السرية: **${word}**\nلمّح لها دون ذكرها مباشرة.`
+        );
+      }
+
+      await context.channel.send({
+        components: [
+          new ContainerBuilder()
+            .setAccentColor(0x2ECC71)
+            .addTextDisplayComponents(t => t.setContent(
+              `## 🔄 الجولة ${round}\n` +
+              `### ${style === 'classic' ? '🎯 مرحلة التلميحات' : '❓ مرحلة الأسئلة'}\n\n` +
+              `الكلمة السرية **تغيرت**!\n\n` +
+              `اللاعبون المتبقون: ${remainingPlayers.map(p => `<@${p.id}>`).join(', ')}`
+            )),
+        ],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      await sleep(2000);
+
+      if (style === 'classic') {
+        // تلميحات
+        const order = shuffle(remainingPlayers);
+        const hints = [];
+        for (const player of order) {
+          await context.channel.send({
+            components: [new ContainerBuilder()
+              .setAccentColor(0xF39C12)
+              .addTextDisplayComponents(t => t.setContent(
+                `### 🎤 <@${player.id}> — دورك!\nاكتب جملة تلميحية.\n-# ⏰ ${HINT_TIME / 1000} ثانية`
+              ))
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+          const hint = await collectMessage(context.channel, player.id, HINT_TIME);
+          hints.push({ player, hint });
+          if (hint === null) {
+            await context.channel.send({
+              components: [new ContainerBuilder()
+                .setAccentColor(0xE74C3C)
+                .addTextDisplayComponents(t => t.setContent(`⏰ <@${player.id}> لم يكتب تلميحاً — تجاوز.`))
+              ],
+              flags: MessageFlags.IsComponentsV2,
+            });
+          }
+        }
+        const validHints = hints.filter(h => h.hint !== null);
+        await context.channel.send({
+          components: [new ContainerBuilder()
+            .setAccentColor(0x3498DB)
+            .addTextDisplayComponents(t => t.setContent(
+              `## 📋 ملخص التلميحات\n\n` +
+              (validHints.length ? validHints.map((h, i) => `> **${i + 1}.** ${h.player.displayName}\n> *"${h.hint}"*`).join('\n\n') : '> *لا توجد تلميحات!*')
+            ))
+          ],
+          flags: MessageFlags.IsComponentsV2,
+        });
+        await sleep(2000);
+      } else {
+        // أسئلة مبسطة
+        let qRounds = 0;
+        let voteRequested = false;
+        let currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+
+        const textVoteCollector = context.channel.createMessageCollector({
+          filter: m => !m.author.bot && remainingPlayers.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
+        });
+        textVoteCollector.on('collect', () => { voteRequested = true; textVoteCollector.stop(); });
+
+        while (!voteRequested && qRounds < MIN_ROUNDS + 10) {
+          const others = remainingPlayers.filter(p => p.id !== currentAsker.id);
+          const target = others[Math.floor(Math.random() * others.length)];
+
+          await context.channel.send({
+            components: [new ContainerBuilder()
+              .setAccentColor(0xF39C12)
+              .addTextDisplayComponents(t => t.setContent(
+                `### ❓ الجولة ${qRounds + 1}\n<@${currentAsker.id}> — اسأل <@${target.id}> سؤالاً!\n-# ⏰ ${ANSWER_TIME / 1000} ثانية`
+              ))
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+          const question = await collectMessage(context.channel, currentAsker.id, ANSWER_TIME);
+          if (!question) {
+            await context.channel.send({
+              components: [new ContainerBuilder()
+                .setAccentColor(0x7F8C8D)
+                .addTextDisplayComponents(t => t.setContent(`⏰ <@${currentAsker.id}> لم يسأل — تخطي.`))
+              ],
+              flags: MessageFlags.IsComponentsV2,
+            });
+            currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+            qRounds++;
+            continue;
+          }
+          await context.channel.send({
+            components: [new ContainerBuilder()
+              .setAccentColor(0x3498DB)
+              .addTextDisplayComponents(t => t.setContent(`### 💬 <@${target.id}> — أجب!\nالسؤال: *"${question}"*\n-# ⏰ ${ANSWER_TIME / 1000} ثانية`))
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          });
+          const answer = await collectMessage(context.channel, target.id, ANSWER_TIME);
+          qRounds++;
+          if (!answer) {
+            await context.channel.send({
+              components: [new ContainerBuilder()
+                .setAccentColor(0x7F8C8D)
+                .addTextDisplayComponents(t => t.setContent(`⏰ <@${target.id}> لم يُجب.`))
+              ],
+              flags: MessageFlags.IsComponentsV2,
+            });
+          }
+          currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+        }
+        try { textVoteCollector.stop(); } catch (_) {}
+      }
+      doHintRound = false; // بعد التلميحات ننتقل للتصويت
+    }
+
+    // مرحلة التصويت (إقصاء واحد)
+    const voteResult = await runDoubleVotePhase(context, remainingPlayers, VOTE_TIME);
+    if (!voteResult) {
+      // لا أصوات، ننهي اللعبة تعسفياً
+      gameEnded = true;
+      break;
+    }
+
+    const eliminatedId = voteResult;
+    const eliminatedPlayer = remainingPlayers.find(p => p.id === eliminatedId);
+    const wasSpy = remainingSpies.some(s => s.id === eliminatedId);
+
+    // إزالة اللاعب من القوائم
+    remainingPlayers = remainingPlayers.filter(p => p.id !== eliminatedId);
+    if (wasSpy) {
+      remainingSpies = remainingSpies.filter(s => s.id !== eliminatedId);
+    }
+
+    await context.channel.send({
+      components: [new ContainerBuilder()
+        .setAccentColor(wasSpy ? 0xE74C3C : 0x2ECC71)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🗳️ نتيجة التصويت\n` +
+          `<@${eliminatedPlayer.id}> تم إقصاؤه.\n` +
+          (wasSpy ? `🔴 كان **جاسوساً**!` : `🟢 كان **من المجموعة**!`)
+        ))
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+
+    // التحقق من شروط النهاية
+    const remainingInnocentsCount = remainingPlayers.length - remainingSpies.length;
+    if (remainingSpies.length === 0) {
+      await endDoubleGame(context, 'group', allSpies, allInnocents, players, callback);
+      gameEnded = true;
+      break;
+    }
+    if (remainingSpies.length >= remainingInnocentsCount) {
+      await endDoubleGame(context, 'spies', allSpies, allInnocents, players, callback);
+      gameEnded = true;
+      break;
+    }
+
+    // تصويت اللاعبين المتبقين على الإجراء التالي
+    const action = await askDoubleAction(context, remainingPlayers);
+    if (action === 'new_round') {
+      doHintRound = true;  // جولة تلميحات جديدة
+    } else {
+      doHintRound = false; // تصويت مباشر بدون تلميحات
+    }
+  }
+
+  resetGame();
+  callback();
+}
+
+async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
+  const votes = new Map();
+  const voters = new Set();
+
+  const buildVoteContainer = () => {
+    const rows = [];
+    for (let i = 0; i < activePlayers.length; i += 4) {
+      const row = new ActionRowBuilder();
+      activePlayers.slice(i, i + 4).forEach(p => {
+        const count = votes.get(p.id) || 0;
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`dvote_${p.id}`)
+            .setLabel(`${p.displayName.substring(0, 30)} (${count})`)
+            .setStyle(ButtonStyle.Secondary),
+        );
+      });
+      rows.push(row);
+    }
+    const c = new ContainerBuilder()
+      .setAccentColor(0x8E44AD)
+      .addTextDisplayComponents(t => t.setContent(`🗳️ صوّت على من تشك أنه جاسوس:`));
+    rows.forEach(row => c.addActionRowComponents(r => { row.components.forEach(b => r.addComponents(b)); return r; }));
+    return c;
+  };
+
+  let voteMsg = await context.channel.send({
+    components: [buildVoteContainer()],
+    flags: MessageFlags.IsComponentsV2,
+  });
+
+  await new Promise(resolve => {
+    const col = voteMsg.createMessageComponentCollector({
+      filter: i => i.customId.startsWith('dvote_') && activePlayers.some(p => p.id === i.user.id),
+      time: VOTE_TIME,
+    });
+    col.on('collect', async i => {
+      if (voters.has(i.user.id)) {
+        await i.reply({ content: '⚠️ صوّتت بالفعل!', ephemeral: true });
+        return;
+      }
+      const target = i.customId.replace('dvote_', '');
+      if (target === i.user.id) {
+        await i.reply({ content: '❌ لا يمكنك التصويت على نفسك!', ephemeral: true });
+        return;
+      }
+      voters.add(i.user.id);
+      votes.set(target, (votes.get(target) || 0) + 1);
+      try {
+        await i.update({ components: [buildVoteContainer()], flags: MessageFlags.IsComponentsV2 });
+      } catch (_) {
+        await i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+      }
+    });
+    col.on('end', resolve);
+  });
+
+  try {
+    const disabledContainer = new ContainerBuilder()
+      .setAccentColor(0x7F8C8D)
+      .addTextDisplayComponents(t => t.setContent(`🔒 انتهى وقت التصويت.`));
+    await voteMsg.edit({ components: [disabledContainer], flags: MessageFlags.IsComponentsV2 });
+  } catch (_) {}
+
+  let mostVoted = null, maxVotes = 0;
+  for (const [id, count] of votes) {
+    if (count > maxVotes) { maxVotes = count; mostVoted = id; }
+  }
+  return mostVoted || null;
+}
+
+async function askDoubleAction(context, remainingPlayers) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('double_new_round').setLabel('🔄 جولة جديدة').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('double_direct_vote').setLabel('⚡ تصويت مباشر').setStyle(ButtonStyle.Danger),
+  );
+  const msg = await context.channel.send({
+    content: '**ماذا تريدون أن تفعلوا؟**\nاختيار: جولة جديدة (بتلميحات/أسئلة جديدة) أم تصويت مباشر؟',
+    components: [row],
+    fetchReply: true,
+  });
+
+  const votes = { new_round: 0, direct_vote: 0 };
+  const voters = new Set();
+
+  const collector = msg.createMessageComponentCollector({
+    filter: i => (i.customId === 'double_new_round' || i.customId === 'double_direct_vote') &&
+                  remainingPlayers.some(p => p.id === i.user.id),
+    time: 30_000,
+  });
+
+  await new Promise(resolve => {
+    collector.on('collect', i => {
+      if (voters.has(i.user.id)) {
+        i.reply({ content: '⚠️ صوتت بالفعل!', ephemeral: true });
+        return;
+      }
+      voters.add(i.user.id);
+      if (i.customId === 'double_new_round') votes.new_round++;
+      else votes.direct_vote++;
+      i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+    });
+    collector.on('end', resolve);
+  });
+
+  try { await msg.delete(); } catch (_) {}
+  return votes.new_round >= votes.direct_vote ? 'new_round' : 'direct_vote';
+}
+
+async function endDoubleGame(context, winner, allSpies, allInnocents, originalPlayers, callback) {
+  const pts = config.winPoints?.outsider ?? 100;
+  if (winner === 'group') {
+    for (const p of allInnocents) {
+      await db.addPoints(p.id, pts);
+    }
+    await context.channel.send({
+      components: [new ContainerBuilder()
+        .setAccentColor(0x2ECC71)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🏆 المجموعة تفوز!\nتم كشف جميع الجواسيس.\nالجواسيس كانوا: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل فرد من المجموعة.`
+        ))
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+  } else {
+    for (const s of allSpies) {
+      await db.addPoints(s.id, pts);
+    }
+    await context.channel.send({
+      components: [new ContainerBuilder()
+        .setAccentColor(0xE74C3C)
+        .addTextDisplayComponents(t => t.setContent(
+          `## 🕵️ الجواسيس يفوزون!\nالجواسيس: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل جاسوس.`
+        ))
+      ],
+      flags: MessageFlags.IsComponentsV2,
+    });
+  }
+  await sendJudgeDM(context.client, `انتهت لعبة الجواسيس المتعددين. الفائز: ${winner}.`);
 }
 
 // ════════════════════════════════════════════════════════════════════
