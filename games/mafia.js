@@ -1,4 +1,3 @@
-
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -670,9 +669,6 @@ async function noWinner(context, callback) {
 }
 
 async function drawGame(context, allPlayers, type, winnerType) {
-  const canvas = createCanvas(626, 339);
-  const ctx = canvas.getContext("2d");
-
   const loadImg = async (filePath) => {
       try {
           return await loadImage(filePath);
@@ -683,9 +679,30 @@ async function drawGame(context, allPlayers, type, winnerType) {
   };
 
   if (type === "start") {
+    // --- بداية عرض البانر والأيقونات بحجمها الطبيعي دون تلاعب ---
     const banner = await loadImg(ROUND_BANNER);
-    if(banner) ctx.drawImage(banner, 0, 0, 626, 339);
-    else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
+    if (!banner) {
+      // احتياط في حالة عدم وجود الصورة
+      const canvasFallback = createCanvas(626, 339);
+      const ctxFallback = canvasFallback.getContext("2d");
+      ctxFallback.fillStyle = "#333";
+      ctxFallback.fillRect(0, 0, 626, 339);
+      const buffer = canvasFallback.toBuffer("image/png");
+      return new AttachmentBuilder(buffer, { name: "mafia-game.png" });
+    }
+
+    const naturalWidth = banner.width;
+    const naturalHeight = banner.height;
+
+    const canvas = createCanvas(naturalWidth, naturalHeight);
+    const ctx = canvas.getContext("2d");
+
+    // رسم البانر بحجمه الأصلي
+    ctx.drawImage(banner, 0, 0);
+
+    // حساب معاملات القياس للمواضع فقط (حتى تبقى الأيقونات في أماكنها الصحيحة نسبيًا)
+    const scaleX = naturalWidth / 626;
+    const scaleY = naturalHeight / 339;
 
     const mafiaIcon = await loadImg(MAFIA_ICON);
     const citizenIcon = await loadImg(CITIZEN_ICON);
@@ -695,56 +712,104 @@ async function drawGame(context, allPlayers, type, winnerType) {
     const citizenPlayers = allPlayers.filter((p) => p.role === "citizen");
     const doctorPlayers = allPlayers.filter((p) => p.role === "doctor");
 
-    const mafiaIconWidth = 22, mafiaIconHeight = 43, iconGap = 9, iconsPerRow = 5;
-    const mafiaContainerWidth = 194, mafiaContainerX = 88, mafiaContainerY = 150;
+    // أبعاد الأيقونات الأصلية تستخدم كما هي (بدون تحجيم)
+    // لكن نستخدم عرض وارتفاع الأيقونة الأصلية عند الحاجة لمعرفة الفجوات
+    const mafiaIconW = mafiaIcon ? mafiaIcon.width : 22;
+    const mafiaIconH = mafiaIcon ? mafiaIcon.height : 43;
+    const citizenIconW = citizenIcon ? citizenIcon.width : 27;
+    const citizenIconH = citizenIcon ? citizenIcon.height : 43;
+    const doctorIconW = doctorIcon ? doctorIcon.width : 27;
+    const doctorIconH = doctorIcon ? doctorIcon.height : 43;
 
-    const drawIcons = (icon, players, cX, cY, cW, iW, iH) => {
-      if (!icon) return;
-      players.forEach((player, index) => {
+    // الفجوة بين الأيقونات تتناسب مع القياس
+    const iconGap = 9 * scaleX;
+    const iconsPerRow = 5;
+
+    // حاويات الأيقونات بعد القياس
+    const mafiaContainerWidth = 194 * scaleX;
+    const mafiaContainerX = 88 * scaleX;
+    const mafiaContainerY = 150 * scaleY;
+
+    const citizenContainerX = 345 * scaleX;
+    const citizenContainerY = 150 * scaleY;
+
+    // دالة رسم أيقونات المافيا
+    if (mafiaIcon) {
+      mafiaPlayers.forEach((player, index) => {
         const row = Math.floor(index / iconsPerRow);
         const col = index % iconsPerRow;
-        const xOffset = cX + (cW - (iconsPerRow * iW + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (iW + iconGap);
-        const yPos = cY + row * (iH + iconGap);
-        ctx.drawImage(icon, xPos, yPos, iW, iH);
+        const xOffset = mafiaContainerX + (mafiaContainerWidth - (iconsPerRow * mafiaIconW + (iconsPerRow - 1) * iconGap)) / 2;
+        const xPos = xOffset + col * (mafiaIconW + iconGap);
+        const yPos = mafiaContainerY + row * (mafiaIconH + iconGap);
+        ctx.drawImage(mafiaIcon, xPos, yPos);
       });
-    };
+    }
 
-    drawIcons(mafiaIcon, mafiaPlayers, mafiaContainerX, mafiaContainerY, mafiaContainerWidth, mafiaIconWidth, mafiaIconHeight);
-
-    const citizenIconWidth = 27, iconHeight = 43;
-    const citizenContainerX = 345, citizenContainerY = 150;
-
-    if(citizenIcon) citizenPlayers.forEach((player, index) => {
+    // رسم أيقونات المواطنين
+    if (citizenIcon) {
+      citizenPlayers.forEach((player, index) => {
         const row = Math.floor(index / iconsPerRow);
         const col = index % iconsPerRow;
-        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * citizenIconWidth + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (citizenIconWidth + iconGap);
-        const yPos = citizenContainerY + row * (iconHeight + iconGap);
-        ctx.drawImage(citizenIcon, xPos, yPos, citizenIconWidth, iconHeight);
-    });
+        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * citizenIconW + (iconsPerRow - 1) * iconGap)) / 2;
+        const xPos = xOffset + col * (citizenIconW + iconGap);
+        const yPos = citizenContainerY + row * (citizenIconH + iconGap);
+        ctx.drawImage(citizenIcon, xPos, yPos);
+      });
+    }
 
-    if(doctorIcon) doctorPlayers.forEach((player, index) => {
+    // رسم أيقونات الطبيب
+    if (doctorIcon) {
+      doctorPlayers.forEach((player, index) => {
         const citizenIdx = citizenPlayers.length + index;
         const row = Math.floor(citizenIdx / iconsPerRow);
         const col = citizenIdx % iconsPerRow;
-        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * citizenIconWidth + (iconsPerRow - 1) * iconGap)) / 2;
-        const xPos = xOffset + col * (citizenIconWidth + iconGap);
-        const yPos = citizenContainerY + row * (iconHeight + iconGap);
-        ctx.drawImage(doctorIcon, xPos, yPos, citizenIconWidth, iconHeight);
-    });
+        const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * doctorIconW + (iconsPerRow - 1) * iconGap)) / 2;
+        const xPos = xOffset + col * (doctorIconW + iconGap);
+        const yPos = citizenContainerY + row * (doctorIconH + iconGap);
+        ctx.drawImage(doctorIcon, xPos, yPos);
+      });
+    }
+
+    const buffer = canvas.toBuffer("image/png");
+    return new AttachmentBuilder(buffer, { name: "mafia-game.png" });
 
   } else if (type === "end") {
+    // --- عرض صورة النهاية بحجمها الطبيعي والأفاتار بالمقاييس القديمة (لأنها ليست أيقونات المافيا والمواطن) ---
     let winBanner;
     if (winnerType === "mafia") winBanner = await loadImg(MAFIA_WIN_BANNER);
     else winBanner = await loadImg(CITIZEN_WIN_BANNER);
 
-    if(winBanner) ctx.drawImage(winBanner, 0, 0, 626, 339);
-    else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
+    if (!winBanner) {
+      const canvasFallback = createCanvas(626, 339);
+      const ctxFallback = canvasFallback.getContext("2d");
+      ctxFallback.fillStyle = "#333";
+      ctxFallback.fillRect(0, 0, 626, 339);
+      const buffer = canvasFallback.toBuffer("image/png");
+      return new AttachmentBuilder(buffer, { name: "mafia-game.png" });
+    }
 
-    const avatarSize = 30, avatarGap = 9, iconsPerRow = 5;
-    const mafiaContainerWidth = 194, mafiaContainerX = 88, mafiaContainerY = 150;
-    const citizenContainerX = 345, citizenContainerY = 150;
+    const naturalWidth = winBanner.width;
+    const naturalHeight = winBanner.height;
+
+    const canvas = createCanvas(naturalWidth, naturalHeight);
+    const ctx = canvas.getContext("2d");
+
+    // رسم بانر النهاية بحجمه الأصلي
+    ctx.drawImage(winBanner, 0, 0);
+
+    // معاملات القياس للمواضع
+    const scaleX = naturalWidth / 626;
+    const scaleY = naturalHeight / 339;
+
+    const avatarSize = 30; // الحجم الأساسي
+    const avatarGap = 9;
+    const iconsPerRow = 5;
+
+    const mafiaContainerWidth = 194 * scaleX;
+    const mafiaContainerX = 88 * scaleX;
+    const mafiaContainerY = 150 * scaleY;
+    const citizenContainerX = 345 * scaleX;
+    const citizenContainerY = 150 * scaleY;
 
     const mafiaPlayers = allPlayers.filter((p) => p.role === "mafia");
     const citizenAndDoctorPlayers = allPlayers.filter((p) => p.role === "citizen" || p.role === "doctor");
@@ -754,37 +819,47 @@ async function drawGame(context, allPlayers, type, winnerType) {
     const mafiaAvatars = await Promise.all(mafiaPlayers.map(p => loadImg(p.avatarURL).catch(e => fallbackAvatar)));
     const citizenAndDoctorAvatars = await Promise.all(citizenAndDoctorPlayers.map(p => loadImg(p.avatarURL).catch(e => fallbackAvatar)));
 
+    // رسم أفاتار المافيا بالأبعاد المقاسة
     mafiaAvatars.forEach((avatar, index) => {
       const row = Math.floor(index / iconsPerRow);
       const col = index % iconsPerRow;
-      const xOffset = mafiaContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
-      const xPos = xOffset + col * (avatarSize + avatarGap);
-      const yPos = mafiaContainerY + row * (avatarSize + avatarGap);
+      const xOffset = mafiaContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize * scaleX + (iconsPerRow - 1) * avatarGap * scaleX)) / 2;
+      const xPos = xOffset + col * (avatarSize * scaleX + avatarGap * scaleX);
+      const yPos = mafiaContainerY + row * (avatarSize * scaleY + avatarGap * scaleY);
 
       ctx.save();
       ctx.beginPath();
-      ctx.arc(xPos + avatarSize / 2, yPos + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.arc(xPos + (avatarSize * scaleX) / 2, yPos + (avatarSize * scaleY) / 2, (avatarSize * scaleX) / 2, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize, avatarSize);
+      ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize * scaleX, avatarSize * scaleY);
       ctx.restore();
     });
 
+    // رسم أفاتار المواطنين والطبيب
     citizenAndDoctorAvatars.forEach((avatar, index) => {
       const row = Math.floor(index / iconsPerRow);
       const col = index % iconsPerRow;
-      const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize + (iconsPerRow - 1) * avatarGap)) / 2;
-      const xPos = xOffset + col * (avatarSize + avatarGap);
-      const yPos = citizenContainerY + row * (avatarSize + avatarGap);
+      const xOffset = citizenContainerX + (mafiaContainerWidth - (iconsPerRow * avatarSize * scaleX + (iconsPerRow - 1) * avatarGap * scaleX)) / 2;
+      const xPos = xOffset + col * (avatarSize * scaleX + avatarGap * scaleX);
+      const yPos = citizenContainerY + row * (avatarSize * scaleY + avatarGap * scaleY);
 
       ctx.save();
       ctx.beginPath();
-      ctx.arc(xPos + avatarSize / 2, yPos + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+      ctx.arc(xPos + (avatarSize * scaleX) / 2, yPos + (avatarSize * scaleY) / 2, (avatarSize * scaleX) / 2, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize, avatarSize);
+      ctx.drawImage(avatar || fallbackAvatar, xPos, yPos, avatarSize * scaleX, avatarSize * scaleY);
       ctx.restore();
     });
+
+    const buffer = canvas.toBuffer("image/png");
+    return new AttachmentBuilder(buffer, { name: "mafia-game.png" });
   }
 
-  const buffer = canvas.toBuffer("image/png");
-  return new AttachmentBuilder(buffer, { name: "mafia-game.png" });
+  // احتياطي في حالة type غير معروف
+  const canvasDefault = createCanvas(626, 339);
+  const ctxDefault = canvasDefault.getContext("2d");
+  ctxDefault.fillStyle = "#333";
+  ctxDefault.fillRect(0, 0, 626, 339);
+  const bufferDefault = canvasDefault.toBuffer("image/png");
+  return new AttachmentBuilder(bufferDefault, { name: "mafia-game.png" });
 }
