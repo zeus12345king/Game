@@ -1,8 +1,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════
-
-//  🕵️  لعبة الجاسوس  — نسخة مُعاد كتابتها بالكامل
+//  🕵️  لعبة الجاسوس  — نسخة مُعاد كتابتها بالكامل (مع سجلات الحكم)
 // ═══════════════════════════════════════════════════════════════════
 
 const {
@@ -111,6 +110,25 @@ async function sendDM(client, player, content) {
     await wh.send({ content, ephemeral: true });
   } catch (e) {
     console.error(`[Spy] فشل إرسال DM لـ ${player.id}:`, e);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  إرسال سجلات الحكم (قناة اللوغات)
+// ════════════════════════════════════════════════════════════════════
+
+const JUDGE_CHANNEL_ID = '1351312429354713098'; // نفس قناة المحبس
+
+async function sendJudgeDM(client, content) {
+  try {
+    const judgeChannel = await client.channels.fetch(JUDGE_CHANNEL_ID);
+    if (judgeChannel) {
+      await judgeChannel.send(content);
+    } else {
+      console.error('[Spy Judge] القناة غير موجودة.');
+    }
+  } catch (e) {
+    console.error('[Spy Judge] فشل إرسال التقرير للقناة:', e);
   }
 }
 
@@ -353,6 +371,9 @@ async function runClassicMode({ context, players, callback }) {
   // التعديل الوحيد: إشراك الجميع (بمن فيهم الجاسوس) في ترتيب التلميحات
   const order       = shuffle(players);
 
+  // ══ إرسال سجل الحكم: بدء الوضع الكلاسيكي ══
+  await sendJudgeDM(context.client, `🎯 وضع كلاسيكي:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
+
   // إرسال الأدوار سراً
   await context.channel.send({
     components: [
@@ -445,6 +466,10 @@ async function runClassicMode({ context, players, callback }) {
     flags: MessageFlags.IsComponentsV2,
   });
 
+  // ══ إرسال سجل الحكم: التلميحات ══
+  const hintsLog = hints.map(h => `${h.player.displayName}: ${h.hint ?? 'لم يكتب'}`).join('\n');
+  await sendJudgeDM(context.client, `📋 تلميحات الكلاسيكي:\n${hintsLog}`);
+
   await sleep(2000);
 
   // الانتقال مباشرة للتصويت (بدون تخمين علني مبكر)
@@ -462,6 +487,9 @@ async function runQuestionsMode({ context, players, callback }) {
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
   const insiders    = players.filter((_, i) => i !== outsiderIdx);
+
+  // ══ سجل الحكم: بدء وضع الأسئلة ══
+  await sendJudgeDM(context.client, `❓ وضع الأسئلة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
 
   // توزيع الأدوار
   await context.channel.send({
@@ -688,6 +716,9 @@ async function runMissionMode({ context, players, callback }) {
   const mission     = MISSIONS[Math.floor(Math.random() * MISSIONS.length)];
   const missionKeys = MISSION_KEYWORDS[mission] ?? [];
 
+  // ══ سجل الحكم: بدء وضع المهمة ══
+  await sendJudgeDM(context.client, `💣 وضع المهمة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- المهمة: ${mission}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
+
   await context.channel.send({
     components: [
       new ContainerBuilder()
@@ -760,6 +791,9 @@ async function runMissionMode({ context, players, callback }) {
   if (!discussCol.ended) discussCol.stop();
 
   if (missionComplete && missionKeys.length > 0) {
+    // ══ سجل الحكم: إنجاز المهمة ══
+    await sendJudgeDM(context.client, `💣 مهمة الجاسوس أنجزت بواسطة ذكر الكلمة من <@${missionCompleter}>`);
+
     await context.channel.send({
       components: [
         new ContainerBuilder()
@@ -980,6 +1014,9 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       await db.addPoints(p.id, pts);
     }
   }
+
+  // ══ سجل الحكم: نتيجة التصويت والنتيجة النهائية ══
+  await sendJudgeDM(context.client, `🗳️ نتيجة التصويت (${mode}):\n${voteSummary.join('\n')}\n- الجاسوس الحقيقي: ${outsider.displayName}\n- الفائز: ${winner === 'outsider' ? 'الجاسوس' : 'المجموعة'}`);
 
   await context.channel.send({
     components: [
