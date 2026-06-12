@@ -1,3 +1,5 @@
+
+
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -64,28 +66,6 @@ module.exports = {
    * @param {function} callback
    */
   async execute(message, args, callback) {
-    if (args[0] === 'اختبار') {
-      const fakePlayers = [
-        { id: '1', displayName: 'لاعب1', avatarURL: 'https://cdn.discordapp.com/embed/avatars/0.png', role: 'mafia', voteCount: 0, takeVote: false },
-        { id: '2', displayName: 'لاعب2', avatarURL: 'https://cdn.discordapp.com/embed/avatars/1.png', role: 'mafia', voteCount: 0, takeVote: false },
-        { id: '3', displayName: 'لاعب3', avatarURL: 'https://cdn.discordapp.com/embed/avatars/2.png', role: 'citizen', voteCount: 0, takeVote: false },
-        { id: '4', displayName: 'لاعب4', avatarURL: 'https://cdn.discordapp.com/embed/avatars/3.png', role: 'citizen', voteCount: 0, takeVote: false },
-        { id: '5', displayName: 'لاعب5', avatarURL: 'https://cdn.discordapp.com/embed/avatars/4.png', role: 'doctor', voteCount: 0, takeVote: false },
-      ];
-
-      const startImg = await drawGame(message, fakePlayers, 'start');
-      await message.channel.send({ content: '🖼️ اختبار صورة البداية', files: [startImg] });
-
-      const mafiaWin = await drawGame(message, fakePlayers, 'end', 'mafia');
-      await message.channel.send({ content: '🖼️ اختبار فوز المافيا', files: [mafiaWin] });
-
-      const citizenWin = await drawGame(message, fakePlayers, 'end', 'citizen');
-      await message.channel.send({ content: '🖼️ اختبار فوز المواطنين', files: [citizenWin] });
-
-      callback();
-      return;
-    }
-
     if (GAME_ACTIVE) {
       message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء ار حتى انتهاء اللعبة الحالية.**`);
       callback();
