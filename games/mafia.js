@@ -37,6 +37,47 @@ const DOCTOR_ICON = path.join(__dirname, "../img/mafia/doctor.png");
 const MAFIA_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 const CITIZEN_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 
+// --- دالة جديدة لإنشاء صورة اللوبي مع أيقونات محايدة ---
+async function generateLobbyImage(players) {
+  const canvas = createCanvas(626, 339);
+  const ctx = canvas.getContext("2d");
+
+  const loadImg = async (filePath) => {
+    try { return await loadImage(filePath); } catch (e) { return null; }
+  };
+
+  const banner = await loadImg(ROUND_BANNER);
+  if (banner) ctx.drawImage(banner, 0, 0, 626, 339);
+  else { ctx.fillStyle = "#333"; ctx.fillRect(0, 0, 626, 339); }
+
+  // نستخدم أيقونة المواطن كلاعب محايد في اللوبي
+  const citizenIcon = await loadImg(CITIZEN_ICON);
+  if (!citizenIcon) return canvas.toBuffer("image/png");
+
+  const iconWidth = 27, iconHeight = 43, iconGap = 9, iconsPerRow = 5;
+  const containerWidth = 194;
+  // سنرسم كل اللاعبين في حاوية واحدة (وسط الصورة مثلاً) أو نوزعهم عشوائياً
+  // سأضعهم في منتصف المساحة السفلية
+  const totalPlayers = players.length;
+  if (totalPlayers === 0) return canvas.toBuffer("image/png");
+
+  // حساب صف واحد أو أكثر
+  const rows = Math.ceil(totalPlayers / iconsPerRow);
+  const startX = (626 - (Math.min(iconsPerRow, totalPlayers) * iconWidth + (Math.min(iconsPerRow, totalPlayers) - 1) * iconGap)) / 2;
+  const startY = 180;
+
+  players.forEach((player, index) => {
+    const row = Math.floor(index / iconsPerRow);
+    const col = index % iconsPerRow;
+    const x = startX + col * (iconWidth + iconGap);
+    const y = startY + row * (iconHeight + iconGap);
+    ctx.drawImage(citizenIcon, x, y, iconWidth, iconHeight);
+  });
+
+  return canvas.toBuffer("image/png");
+}
+// -----------------------------------------------------
+
 function buildMafiaLobby(nowTime, players) {
   const list = players.length ? players.map((p, i) => `> **${i + 1}.** <@${p.id}>`).join('\n') : '> لا يوجد لاعبين بعد';
   return new ContainerBuilder()
@@ -45,7 +86,6 @@ function buildMafiaLobby(nowTime, players) {
       `## 🕵️ لعبة المافيا\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
       `**اللاعبون (${players.length}/${MAX_PLAYERS}):**\n${list}`
     ))
-    // تم إزالة addMediaGalleryComponents من هنا
     .addActionRowComponents(r => r.setComponents(
       new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Danger)
@@ -58,11 +98,6 @@ let players = [];
 module.exports = {
   name: 'mafia',
   aliases: ["مافيا"],
-  /**
-   * @param {import('discord.js').Message} message
-   * @param {string[]} args
-   * @param {function} callback
-   */
   async execute(message, args, callback) {
     if (GAME_ACTIVE) {
       message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء ار حتى انتهاء اللعبة الحالية.**`);
@@ -110,8 +145,10 @@ async function startGame(context, nowTime, callback) {
 
   let sentMessage;
   try {
-    // إرسال صورة اللوبي كملف مرفق بحجمها الطبيعي
-    const lobbyAttachment = new AttachmentBuilder(config.lobbyImages.mafia);
+    // توليد صورة اللوبي الأولية (فارغة)
+    const initialBuffer = await generateLobbyImage(players);
+    const lobbyAttachment = new AttachmentBuilder(initialBuffer, { name: "lobby.png" });
+
     sentMessage = await context.reply({
       components: [buildMafiaLobby(nowTime, players)],
       files: [lobbyAttachment],
@@ -143,7 +180,14 @@ async function startGame(context, nowTime, callback) {
               voteCount: 0,
               takeVote: false,
             });
-            await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+            // تحديث الصورة والمكونات
+            const newBuffer = await generateLobbyImage(players);
+            const newAttachment = new AttachmentBuilder(newBuffer, { name: "lobby.png" });
+            await i.update({
+              components: [buildMafiaLobby(nowTime, players)],
+              files: [newAttachment],
+              flags: MessageFlags.IsComponentsV2
+            });
           } else {
             await i.reply({ content: `أنت بالفعل في اللعبة! 🚫`, ephemeral: true });
           }
@@ -154,7 +198,13 @@ async function startGame(context, nowTime, callback) {
         const playerExists = players.some((player) => player.id === i.user.id);
         if (playerExists) {
           players = players.filter((player) => player.id !== i.user.id);
-          await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+          const newBuffer = await generateLobbyImage(players);
+          const newAttachment = new AttachmentBuilder(newBuffer, { name: "lobby.png" });
+          await i.update({
+            components: [buildMafiaLobby(nowTime, players)],
+            files: [newAttachment],
+            flags: MessageFlags.IsComponentsV2
+          });
         } else {
           await i.reply({ content: `لم تكن في اللعبة. ❓`, ephemeral: true });
         }
