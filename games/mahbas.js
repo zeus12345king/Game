@@ -167,9 +167,6 @@ async function sendDM(client, player, content, components = []) {
 }
 
 /**
- * إرسال تقرير للحكم (DM)
- */
-/**
  * إرسال تقرير للحكم (إلى قناة نصية خاصة)
  */
 async function sendJudgeDM(client, content) {
@@ -717,7 +714,7 @@ async function runLobby(context, callback) {
       await realGameLoop(context, state, callback);
 
     } else {
-      // ═══ الوضع الكلاسيكي (بدون أي تعديل) ═══
+      // ═══ الوضع الكلاسيكي (مع إضافة سجلات الحكم) ═══
       const state = {
         teamA, teamB,
         scoreA     : 0,
@@ -756,7 +753,7 @@ async function runLobby(context, callback) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  الحلقة الرئيسية للعبة (الوضع الكلاسيكي — بدون أي تعديل)
+//  الحلقة الرئيسية للعبة (الوضع الكلاسيكي — مع إضافة سجلات الحكم)
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function gameLoop(context, state, callback) {
@@ -802,13 +799,20 @@ async function gameLoop(context, state, callback) {
   };
   if (canvas) roundHeader.files = [canvas];
   await context.channel.send(roundHeader);
+
+  // ══ إرسال سجل الحكم: بدء الجولة ══
+  await sendJudgeDM(context.client, `🔄 الجولة ${state.round}: ${hidingName} يخفي، ${guessingName} يخمن.`);
+
   await sleep(2000);
 
   // ══ 1. مرحلة الإخفاء ════════════════════════════════════════════════
   const holder = await runHidePhase(context, hidingTeam, hidingName, hidingPowers, state);
+  await sendJudgeDM(context.client, `💍 حامل المحبس: ${holder.displayName} (${holder.id})`);
 
   // ══ 2. مرحلة الإيماءات ══════════════════════════════════════════════
   const gestures = await runBluffPhase(context, hidingTeam, hidingName, holder);
+  const gesturesSummary = hidingTeam.map(p => `${p.displayName}: ${gestures[p.id].emoji}`).join(', ');
+  await sendJudgeDM(context.client, `🤌 إيماءات ${hidingName}: ${gesturesSummary}`);
 
   // ══ 3. كشف الإيماءات ════════════════════════════════════════════════
   await revealGestures(context, hidingTeam, gestures, hidingName, guessingName);
@@ -821,8 +825,13 @@ async function gameLoop(context, state, callback) {
     context, guessingTeam, guessPowers, guessingName,
     hidingTeam, gestures, holder,
   );
-  if (powerResult.type === 'time')    extraTime       = T_POWER_EXTRA;
-  if (powerResult.type === 'reveal')  revealedGesture = powerResult.data;
+  if (powerResult.type === 'reveal') {
+    revealedGesture = powerResult.data;
+    await sendJudgeDM(context.client, `🔍 بطاقة تحقيق استُخدمت لكشف إيماءة ${revealedGesture.player.displayName}: ${revealedGesture.gesture.emoji}`);
+  } else if (powerResult.type === 'time') {
+    extraTime = T_POWER_EXTRA;
+    await sendJudgeDM(context.client, `⏱️ بطاقة وقت إضافي استُخدمت (+${T_POWER_EXTRA/1000}s)`);
+  }
 
   // عرض كشف الإيماءة الحقيقية (إذا استخدموا بطاقة التحقيق)
   if (revealedGesture) {
@@ -849,6 +858,7 @@ async function gameLoop(context, state, callback) {
 
   // ══ 6. نتيجة الجولة ═════════════════════════════════════════════════
   const addedPts = await roundResult(context, state, guessResult, hidingIdx, holder, hidingName, guessingName);
+  await sendJudgeDM(context.client, `🏆 نتيجة الجولة ${state.round}: ${guessResult.success ? `${guessingName} نجح (${addedPts} نقطة)` : `${hidingName} نجح (${addedPts} نقطة)`} - المحبس كان عند ${holder.displayName}`);
 
   // بطاقة تبديل المخبي؟ (للفريق المخبي قبل الجولة التالية — لا تؤثر على هذه الجولة)
   // لا حاجة — يُستخدم في بداية مرحلة الإخفاء
@@ -1201,7 +1211,7 @@ async function offerPowerCard(context, guessingTeam, guessPowers, guessingName, 
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  4. مرحلة التخمين (الوضع الكلاسيكي — بدون تعديل)
+//  4. مرحلة التخمين (الوضع الكلاسيكي — مع سجل لكل محاولة)
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hidingName, holder, totalTime) {
@@ -1296,11 +1306,13 @@ async function runGuessPhase(context, guessingTeam, hidingTeam, guessingName, hi
         ],
         flags: MessageFlags.IsComponentsV2,
       });
+      await sendJudgeDM(context.client, `🔍 المحاولة ${attempt} من ${guessingName}: لم يتم الاختيار (انتهى الوقت)`);
       if (attempt === maxAttempts) return { success: false, attempt: 0, guesser: null };
       continue;
     }
 
     const correct = chosen.targetId === holder.id;
+    await sendJudgeDM(context.client, `🔍 المحاولة ${attempt} من ${guessingName}: <@${chosen.guesser.id}> خمّن <@${chosen.targetId}> (${correct ? 'صحيح' : 'خطأ'})`);
 
     // تأثير درامي قبل الكشف
     await context.channel.send({
@@ -1714,7 +1726,6 @@ async function runRealHidePhase(context, hidingTeam, hidingName, guessingName) {
   });
 
   const leader = hidingTeam[0];
-  const judgeId = '1495445873780461651';
 
   // القائد يختار من يعطيه المحبس عبر DM
   const memberOptions = hidingTeam.map(p =>
