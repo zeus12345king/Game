@@ -7,6 +7,8 @@ const {
   ContainerBuilder,
   SeparatorBuilder,
   MessageFlags,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
 } = require("discord.js");
 const path = require("path");
 const db = require('../database.js');
@@ -66,29 +68,75 @@ module.exports = {
   async execute(message, args, callback) {
     // أمر الاختبار السريع لمعاينة الصور
     if (args[0] === 'اختبار') {
-      const fakePlayers = [
-        { id: '1', displayName: 'لاعب1', avatarURL: 'https://cdn.discordapp.com/embed/avatars/0.png', role: 'mafia', voteCount: 0, takeVote: false },
-        { id: '2', displayName: 'لاعب2', avatarURL: 'https://cdn.discordapp.com/embed/avatars/1.png', role: 'mafia', voteCount: 0, takeVote: false },
-        { id: '3', displayName: 'لاعب3', avatarURL: 'https://cdn.discordapp.com/embed/avatars/2.png', role: 'citizen', voteCount: 0, takeVote: false },
-        { id: '4', displayName: 'لاعب4', avatarURL: 'https://cdn.discordapp.com/embed/avatars/3.png', role: 'citizen', voteCount: 0, takeVote: false },
-        { id: '5', displayName: 'لاعب5', avatarURL: 'https://cdn.discordapp.com/embed/avatars/4.png', role: 'doctor', voteCount: 0, takeVote: false },
-      ];
+      // إنشاء قائمة منسدلة لاختيار عدد اللاعبين من 1 إلى 20
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('test_player_count')
+        .setPlaceholder('اختر عدد اللاعبين للتجربة (1-20)')
+        .addOptions(
+          Array.from({ length: 20 }, (_, i) => {
+            const num = i + 1;
+            return new StringSelectMenuOptionBuilder()
+              .setLabel(`${num} لاعب`)
+              .setValue(String(num));
+          })
+        );
 
-      const startImg = await drawGame(message, fakePlayers, 'start');
-      await message.channel.send({ content: '🖼️ اختبار صورة البداية', files: [startImg] });
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+      const selectMessage = await message.channel.send({
+        content: '🔢 اختر عدد اللاعبين الذين تريد اختبار الصور بهم:',
+        components: [row]
+      });
 
-      const mafiaWin = await drawGame(message, fakePlayers, 'end', 'mafia');
-      await message.channel.send({ content: '🖼️ اختبار فوز المافيا', files: [mafiaWin] });
+      try {
+        // انتظار تفاعل المستخدم مع القائمة
+        const filter = i => i.customId === 'test_player_count' && i.user.id === message.author.id;
+        const collected = await selectMessage.awaitMessageComponent({ filter, time: 30000 });
+        const playerCount = parseInt(collected.values[0], 10);
 
-      const citizenWin = await drawGame(message, fakePlayers, 'end', 'citizen');
-      await message.channel.send({ content: '🖼️ اختبار فوز المواطنين', files: [citizenWin] });
+        // بناء لاعبين وهميين بالعدد المختار
+        const fakePlayers = [];
+        for (let i = 0; i < playerCount; i++) {
+          fakePlayers.push({
+            id: String(i + 1),
+            displayName: `لاعب${i + 1}`,
+            avatarURL: `https://cdn.discordapp.com/embed/avatars/${i % 5}.png`,
+            role: null,
+            voteCount: 0,
+            takeVote: false,
+          });
+        }
+
+        // توزيع الأدوار بنفس منطق دالة assignRoles
+        const shuffled = [...fakePlayers].sort(() => Math.random() - 0.5);
+        const mafiaCount = playerCount < 5 ? 1 : playerCount < 10 ? 2 : 3;
+        shuffled.slice(0, mafiaCount).forEach(p => p.role = "mafia");
+        shuffled.slice(mafiaCount, mafiaCount + 1).forEach(p => p.role = "doctor");
+        shuffled.slice(mafiaCount + 1).forEach(p => p.role = "citizen");
+
+        // تعطيل القائمة بعد الاختيار
+        await collected.update({ content: `✅ تم اختيار ${playerCount} لاعب. جاري إنشاء الصور...`, components: [] });
+
+        // إنشاء وإرسال صور الاختبار
+        const startImg = await drawGame(message, fakePlayers, 'start');
+        await message.channel.send({ content: `🖼️ اختبار صورة البداية لـ ${playerCount} لاعب`, files: [startImg] });
+
+        const mafiaWin = await drawGame(message, fakePlayers, 'end', 'mafia');
+        await message.channel.send({ content: `🖼️ اختبار فوز المافيا لـ ${playerCount} لاعب`, files: [mafiaWin] });
+
+        const citizenWin = await drawGame(message, fakePlayers, 'end', 'citizen');
+        await message.channel.send({ content: `🖼️ اختبار فوز المواطنين لـ ${playerCount} لاعب`, files: [citizenWin] });
+
+      } catch (e) {
+        // إذا انتهى الوقت أو حدث خطأ
+        await selectMessage.edit({ content: '⏰ انتهى الوقت أو حدث خطأ.', components: [] });
+      }
 
       callback();
       return;
     }
 
     if (GAME_ACTIVE) {
-      message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء ار حتى انتهاء اللعبة الحالية.**`);
+      message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء انتظار حتى انتهاء اللعبة الحالية.**`);
       callback();
       return;
     }
