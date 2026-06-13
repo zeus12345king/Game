@@ -238,18 +238,18 @@ async function startGame(context, nowTime, callback) {
           usedAbilities: new Set(),
         });
         await i.reply({
-          content: `🎲 | <@${i.user.id}> انضممت للعبة في المكان ${index + 1}!`,
+          content: `<:z5:1512126721367736481> | <@${i.user.id}> انضممت للعبة في المكان ${index + 1}!`,
           ephemeral: true,
         });
         await updateLobbyView();
       } else if (i.customId === "exit") {
         if (!players.some((p) => p.id === i.user.id)) {
-          await i.reply({ content: "🎲 | أنت لست في اللعبة!", ephemeral: true });
+          await i.reply({ content: "<:z4:1511873048557387977> | أنت لست في اللعبة!", ephemeral: true });
           return;
         }
         const removed = players.find((p) => p.id === i.user.id);
         players.splice(players.indexOf(removed), 1);
-        await i.reply({ content: "🎲 | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
+        await i.reply({ content: "<:z3:1511872921142825040> | لقد خرجت من اللعبة بنجاح!", ephemeral: true });
         await updateLobbyView();
       } else if (i.customId === "open_shop_lobby") {
         // =====================================================================
