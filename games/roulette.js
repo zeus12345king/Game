@@ -16,7 +16,7 @@ const GIFEncoder = require("gif-encoder-2");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
-<:z15:1515273469389181071> | <@bot_1781349781696_4> لم تختر أحد وتم طردك.
+⏱️ | <@bot_1781349781696_4> لم تختر أحد وتم طردك.
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 20;
 const TIME_TO_START = config.lobbyTime.roulette;
