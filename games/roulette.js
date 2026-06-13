@@ -402,7 +402,7 @@ async function startGame(context, nowTime, callback) {
       }
 
       if (players.length < MIN_PLAYERS) {
-        await sentMessage.reply("🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
+        await sentMessage.reply("<:z15:1515273469389181071> لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.");
         resetGameData();
         callback(null, false, 0, null);
         return;
@@ -577,7 +577,7 @@ async function prepareRound(
         }
         const botTarget = botTargets[Math.floor(Math.random() * botTargets.length)];
         await sleep(3000);
-        await context.channel.send(`🤖 | **${playerChosen.username}** قرر طرد <@${botTarget.id}> عشوائياً!`);
+        await context.channel.send(`<:z19:1515281183020155080> | **${playerChosen.username}** قرر طرد <@${botTarget.id}> عشوائياً!`);
         await lose(botTarget.id, context);
         eliminatedPlayers.push(botTarget);
         players.splice(players.findIndex((p) => p.id === botTarget.id), 1);
@@ -817,7 +817,7 @@ async function prepareRound(
           if (idx !== -1) players.splice(idx, 1);
 
           await interaction.reply({
-            content: `💣 | تم طرد <@${targetId}>. اختر اللاعب الثاني.`,
+            content: `<:z14:1515267001134616586> | تم طرد <@${targetId}>. اختر اللاعب الثاني.`,
             ephemeral: true,
           });
 
@@ -875,8 +875,8 @@ async function prepareRound(
         }
 
         // طرد عادي
-        await interaction.reply({ content: `💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`, ephemeral: true });
-        await context.channel.send(`💣 | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`);
+        await interaction.reply({ content: `<:z14:1515267001134616586> | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`, ephemeral: true });
+        await context.channel.send(`<:z14:1515267001134616586> | <@${chooserId}> قام بطرد اللاعب: <@${targetId}>`);
 
         await lose(targetId, context);
         eliminatedPlayers.push(targetObj);
@@ -899,7 +899,7 @@ async function prepareRound(
           try {
             if (ii.user.id !== randomPlayerId) {
               await ii.reply({
-                content: `🎲 | ليس دورك <@${ii.user.id}>`,
+                content: `<:z5:1512126721367736481> | ليس دورك <@${ii.user.id}>`,
                 ephemeral: true,
               });
               return;
@@ -1031,8 +1031,8 @@ async function prepareRound(
                 return;
               }
 
-              await ii.reply({ content: `💣 | <@${randomPlayerId}> قام بطرد عشوائياً اللاعب: <@${randomTarget.id}>`, ephemeral: true });
-              await context.channel.send(`💣 | <@${randomPlayerId}> قام بطرد عشوائيا اللاعب: <@${randomTarget.id}>`);
+              await ii.reply({ content: `<:z14:1515267001134616586> | <@${randomPlayerId}> قام بطرد عشوائياً اللاعب: <@${randomTarget.id}>`, ephemeral: true });
+              await context.channel.send(`<:z14:1515267001134616586> | <@${randomPlayerId}> قام بطرد عشوائيا اللاعب: <@${randomTarget.id}>`);
               await lose(randomTarget.id, context);
               eliminatedPlayers.push(randomTarget);
               players.splice(
