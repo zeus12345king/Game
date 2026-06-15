@@ -657,7 +657,7 @@ async function doctorRound(context, players) {
     return { savedPlayer: null, players };
   }
 
-  await context.channel.send(`${EMOJI.DOCTOR} | جاري انتظار الطبيب لاختيار شخص لانقاذه...`);
+  await context.channel.send(`${EMOJI.DOCTOR} | جاري انتظار الطبيب لاختيار شخص لحمايته...`);
 
   return new Promise((resolve) => {
     const filter = (i) => i.customId.startsWith("vote_") && i.user.id === doctor.id;
@@ -733,7 +733,7 @@ async function investigatorRound(context, players) {
         result = `${EMOJI.MAFIA} مافيا`;
       }
 
-      await context.channel.send(`${EMOJI.ANNOUNCE} | نتيجة التحقيق: <@${target.id}> هو **${result}**!`);
+      await context.channel.send(`${EMOJI.ANNOUNCE} |  تم التحقيق مع <@${target.id}> وكان هو **${result}**!`);
       await i.reply({ content: `${EMOJI.SUCCESS} | تم التحقيق`, ephemeral: true });
       collector.stop();
       resolve();
@@ -898,7 +898,7 @@ async function citizenRound(context, players, silencedId) {
         const kicked = top[0];
         const roleName = ROLE_NAMES[kicked.role] || 'مواطن';
 
-        await context.channel.send(`${EMOJI.KICK} | تم طرد <@${kicked.id}>، وكان **${roleName}**`);
+        await context.channel.send(`${EMOJI.KICK} | تم التصويت على <@${kicked.id}>، وكان **${roleName}**`);
         players = players.filter(p => p.id !== kicked.id);
         resolve({ topVotedPlayers: kicked, players });
       } else {
