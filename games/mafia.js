@@ -1,4 +1,3 @@
-
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -63,6 +62,45 @@ const EMOJI = {
   SILENCED: '🤐',
   ANNOUNCE: '📢',
   ROLE_CARD: '🃏',
+};
+
+// ======================== أيقونات أرقام التصويت (تستبدل لاحقاً) ========================
+const DIGIT_EMOJIS = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+function numberToEmoji(num) {
+  if (num === 0) return DIGIT_EMOJIS[0];
+  let str = '';
+  let n = num;
+  while (n > 0) {
+    const digit = n % 10;
+    str = DIGIT_EMOJIS[digit] + str;
+    n = Math.floor(n / 10);
+  }
+  return str;
+}
+
+// ======================== أسماء الأدوار ========================
+const ROLE_NAMES = {
+  mafia_killer: 'القاتل',
+  mafia_godfather: 'العراب',
+  mafia_silencer: 'المُسكِت',
+  mafia_regular: 'مافيا',
+  doctor: 'طبيب',
+  detective: 'محقق',
+  sniper: 'قناص',
+  mayor: 'عمدة',
+  citizen: 'مواطن',
+};
+
+const ROLE_EMOJI = {
+  mafia_killer: EMOJI.MAFIA,
+  mafia_godfather: EMOJI.MAFIA,
+  mafia_silencer: EMOJI.SILENCER,
+  mafia_regular: EMOJI.MAFIA,
+  doctor: EMOJI.DOCTOR,
+  detective: EMOJI.DETECTIVE,
+  sniper: EMOJI.SNIPER,
+  mayor: EMOJI.MAYOR,
+  citizen: EMOJI.CITIZEN,
 };
 
 // ======================== الصور (محتفظ بها للرجوع مستقبلاً) ========================
@@ -251,7 +289,7 @@ async function startGame(context, nowTime, callback) {
           if (!playerExists) {
             players.push({
               id: i.user.id,
-              displayName: i.user.displayName,
+              displayName: i.member?.displayName || i.user.displayName,
               avatarURL: i.user.displayAvatarURL({ extension: "png", forceStatic: true }) || "https://cdn.discordapp.com/embed/avatars/0.png",
               msgInfo: {
                 applicationId: i.applicationId,
@@ -363,6 +401,32 @@ function assignRoles(players) {
 
 // ======================== رسائل الأدوار الخاصة ========================
 async function sendRoleMessages(context, players, AllPlayers) {
+  // إعلان بدء توزيع الأدوار
+  await context.channel.send(`${EMOJI.TIMER} | تم الانتهاء من تسجيل اللاعبين ، جاري توزيع الادوار على اللاعبين...`);
+
+  // ملخص الأدوار
+  const roleCounts = {};
+  players.forEach(p => { roleCounts[p.role] = (roleCounts[p.role] || 0) + 1; });
+
+  const mafiaRoles = ['mafia_killer', 'mafia_godfather', 'mafia_silencer', 'mafia_regular'];
+  const citizenRoles = ['doctor', 'detective', 'sniper', 'mayor', 'citizen'];
+
+  let summary = 'الفريق الأول: المواطنون\n';
+  citizenRoles.forEach(role => {
+    if (roleCounts[role]) {
+      summary += `# ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+    }
+  });
+  summary += '\nالفريق الثاني: المافيا\n';
+  mafiaRoles.forEach(role => {
+    if (roleCounts[role]) {
+      summary += `# ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+    }
+  });
+
+  await context.channel.send(summary);
+
+  // إرسال الأدوار الخاصة لكل لاعب
   for (const player of players) {
     try {
       const webhook = new InteractionWebhook(
@@ -373,11 +437,11 @@ async function sendRoleMessages(context, players, AllPlayers) {
 
       let rolesMessage = {
         mafia_killer: `${EMOJI.MAFIA} | تم اختيارك انت كـ **القاتل**. مهمتك قتل المواطنين مع فريق المافيا.`,
-        mafia_godfather: `${EMOJI.MAFIA} | تم اختيارك انت كـ **العراب**. أنت زعيم المافيا، وعندما يحقق بك المحقق ستظهر كمواطن صالح.`,
+        mafia_godfather: `${EMOJI.MAFIA} | تم اختيارك انت كـ **العراب**. أنت زعيم المافيا، تستطيع القتل وعندما يحقق بك المحقق ستظهر كمواطن صالح.`,
         mafia_silencer: `${EMOJI.SILENCER} | تم اختيارك انت كـ **المُسكِت**. في كل ليلة يمكنك إسكات لاعب ومنعه من التصويت في الجولة التالية.`,
         mafia_regular: `${EMOJI.MAFIA} | تم اختيارك انت كـ **مافيا**. اعمل مع فريقك لقتل المواطنين.`,
         doctor: `${EMOJI.DOCTOR} | تم اختيارك انت كـ **الطبيب**. في كل ليلة تستطيع حماية شخص واحد من القتل.`,
-        detective: `${EMOJI.DETECTIVE} | تم اختيارك انت كـ **المحقق**. كل ليلة تحقق من لاعب واحد وتظهر النتيجة للجميع (العراب يظهر كمواطن).`,
+        detective: `${EMOJI.DETECTIVE} | تم اختيارك انت كـ **المحقق**. كل ليلة تحقق من لاعب واحد وتظهر النتيجة للجميع .`,
         sniper: `${EMOJI.SNIPER} | تم اختيارك انت كـ **القناص**. لديك رصاصة واحدة طوال اللعبة، يمكنك استخدامها لقتل أي لاعب ليلاً، لكن إن كان صالحاً تموت معه.`,
         mayor: `${EMOJI.MAYOR} | تم اختيارك انت كـ **العمدة**. صوتك في جولة الطرد يعادل 3 أصوات.`,
         citizen: `${EMOJI.CITIZEN} | تم اختيارك انت كـ **مواطن**. لا تملك قدرة خاصة، صوتك مهم لكشف المافيا.`,
@@ -401,15 +465,15 @@ async function sendRoleMessages(context, players, AllPlayers) {
     try {
       const gameImage = await drawGame(context, AllPlayers, "start");
       await context.channel.send({
-        content: `${EMOJI.SUCCESS} | تم توزيع الرتب على اللاعبين. ستبدأ الجولة الأولى في بضع ثواني...`,
+        content: `${EMOJI.SUCCESS} | تم توزيع الادوار على اللاعبين ، ستبدأ الجولة الاولى بعد قليل...`,
         files: [gameImage]
       });
     } catch (e) {
       console.error("Failed to draw start game image:", e);
-      await context.channel.send(`${EMOJI.SUCCESS} | تم توزيع الرتب على اللاعبين. ستبدأ الجولة الأولى في بضع ثواني...`);
+      await context.channel.send(`${EMOJI.SUCCESS} | تم توزيع الادوار على اللاعبين ، ستبدأ الجولة الاولى بعد قليل...`);
     }
   } else {
-    await context.channel.send(`${EMOJI.SUCCESS} | تم توزيع الرتب على اللاعبين. ستبدأ الجولة الأولى في بضع ثواني...`);
+    await context.channel.send(`${EMOJI.SUCCESS} | تم توزيع الادوار على اللاعبين ، ستبدأ الجولة الاولى بعد قليل...`);
   }
   await sleep(4000);
 }
@@ -476,6 +540,11 @@ async function mafiaRound(context, players, callback) {
           const webhook = new InteractionWebhook(context.client, p.msgInfo.applicationId, p.msgInfo.interactionToken);
           await webhook.editMessage(p.msgInfo.messageId, { components: updatedButtons });
         } catch (error) {}
+      }
+
+      // إنهاء فوري إذا صوت جميع المافيا
+      if (mafiaPlayers.every(p => p.takeVote)) {
+        collector.stop();
       }
     });
 
@@ -547,6 +616,7 @@ async function mafiaRound(context, players, callback) {
         silencer.takeVote = true;
         await i.reply({ content: `${EMOJI.SUCCESS} | تم إسكات <@${playerId}>`, ephemeral: true });
         resolve(playerId);
+        collector.stop(); // إنهاء فوري
       });
 
       collector.on("end", async () => {
@@ -604,6 +674,7 @@ async function doctorRound(context, players) {
       votedPlayer = players.find(p => p.id === playerId);
       doctor.takeVote = true;
       await i.reply({ content: `${EMOJI.SUCCESS} | لقد صوتت على <@${votedPlayer.id}>`, ephemeral: true });
+      collector.stop(); // إنهاء فوري
     });
 
     collector.on("end", async () => {
@@ -794,6 +865,11 @@ async function citizenRound(context, players, silencedId) {
 
       const updatedButtons = await generateButtons(voteablePlayers);
       await investigateMessage.edit({ components: updatedButtons });
+
+      // إنهاء فوري إذا صوت جميع المؤهلين
+      if (players.filter(p => p.id !== silencedId).every(p => p.takeVote)) {
+        collector.stop();
+      }
     });
 
     collector.on("end", async () => {
@@ -805,10 +881,7 @@ async function citizenRound(context, players, silencedId) {
         });
       } catch (error) {}
 
-      const noVotes = players.filter(p => !p.takeVote && p.id !== silencedId);
-      if (noVotes.length > 0) {
-        await context.channel.send(`${EMOJI.VOTE} | لم يقم بالتصويت: ${noVotes.map(p => `<@${p.id}>`).join(", ")}`);
-      }
+      // تمت إزالة رسالة "لم يقم بالتصويت" حسب الطلب
 
       const maxVotes = Math.max(...players.map(p => p.voteCount), 0);
       if (maxVotes === 0) {
@@ -823,17 +896,7 @@ async function citizenRound(context, players, silencedId) {
         resolve({ topVotedPlayers: "draw", players });
       } else if (top.length === 1) {
         const kicked = top[0];
-        const roleName = {
-          mafia_killer: 'القاتل',
-          mafia_godfather: 'العراب',
-          mafia_silencer: 'المُسكِت',
-          mafia_regular: 'مافيا',
-          doctor: 'طبيب',
-          detective: 'محقق',
-          sniper: 'قناص',
-          mayor: 'عمدة',
-          citizen: 'مواطن',
-        }[kicked.role] || 'مواطن';
+        const roleName = ROLE_NAMES[kicked.role] || 'مواطن';
 
         await context.channel.send(`${EMOJI.KICK} | تم طرد <@${kicked.id}>، وكان **${roleName}**`);
         players = players.filter(p => p.id !== kicked.id);
@@ -860,7 +923,7 @@ async function gameRound(context, players, AllPlayers, callback) {
   if (killTarget === "citizens_win") {
     const allCitizens = AllPlayers.filter(p => !p.role.startsWith('mafia_'));
     const allMafia = AllPlayers.filter(p => p.role.startsWith('mafia_'));
-    const winMessage = `${EMOJI.WIN} | لقد فاز المواطنون والطبيب باللعبة بسبب عدم تصويت المافيا! الفائزون: ${allCitizens.map(p => `<@${p.id}>`).join(", ")}`;
+    const winMessage = `# ${EMOJI.CITIZEN} فوز المواطنين!\n${allCitizens.map(p => `- <@${p.id}> ${EMOJI.CITIZEN} ${ROLE_NAMES[p.role]}`).join('\n')}`;
 
     if (USE_GAME_IMAGES) {
       try {
@@ -896,17 +959,7 @@ async function gameRound(context, players, AllPlayers, callback) {
     if (savedPlayer && killTarget.id === savedPlayer.id) {
       await context.channel.send(`${EMOJI.PROTECT} | لقد نجح الطبيب في حماية <@${savedPlayer.id}> من الاغتيال!`);
     } else {
-      const roleName = {
-        mafia_killer: 'القاتل',
-        mafia_godfather: 'العراب',
-        mafia_silencer: 'المُسكِت',
-        mafia_regular: 'مافيا',
-        doctor: 'طبيب',
-        detective: 'محقق',
-        sniper: 'قناص',
-        mayor: 'عمدة',
-        citizen: 'مواطن',
-      }[killTarget.role] || 'مواطن';
+      const roleName = ROLE_NAMES[killTarget.role] || 'مواطن';
       await context.channel.send(`${EMOJI.KILL} | لقد قتلت المافيا <@${killTarget.id}> وكان **${roleName}**`);
       players = players.filter(p => p.id !== killTarget.id);
       if ((await checkWin(context, players, AllPlayers, callback)) === true) return;
@@ -938,8 +991,8 @@ async function generateButtons(players) {
   const buttons = players.map((player) => {
     return new ButtonBuilder()
       .setCustomId(`vote_${player.id}`)
-      .setLabel(`${player.displayName.substring(0, 75)} (${player.voteCount})`)
-      .setStyle(ButtonStyle.Primary);
+      .setLabel(`${player.displayName.substring(0, 75)} ${numberToEmoji(player.voteCount)}`)
+      .setStyle(ButtonStyle.Secondary); // أزرار رمادية
   });
 
   let rows = [];
@@ -958,7 +1011,7 @@ async function checkWin(context, players, AllPlayers, callback) {
   const allCitizens = AllPlayers.filter(p => p.role && !p.role.startsWith('mafia_'));
 
   if (mafiaAlive.length >= citizensAlive.length && citizensAlive.length > 0) {
-    const winMsg = `${EMOJI.WIN} | لقد فازت المافيا باللعبة! الفائزون: ${allMafia.map(p => `<@${p.id}>`).join(", ")}`;
+    const winMsg = `# ${EMOJI.MAFIA} فوز المافيا!\n${allMafia.map(p => `- <@${p.id}> ${EMOJI.MAFIA} ${ROLE_NAMES[p.role]}`).join('\n')}`;
     if (USE_GAME_IMAGES) {
       try {
         await context.channel.send({ content: winMsg, files: [await drawGame(context, AllPlayers, "end", "mafia")] });
@@ -976,7 +1029,7 @@ async function checkWin(context, players, AllPlayers, callback) {
   }
 
   if (mafiaAlive.length === 0) {
-    const winMsg = `${EMOJI.WIN} | لقد فاز المواطنون! الفائزون: ${allCitizens.map(p => `<@${p.id}>`).join(", ")}`;
+    const winMsg = `# ${EMOJI.CITIZEN} فوز المواطنين!\n${allCitizens.map(p => `- <@${p.id}> ${EMOJI.CITIZEN} ${ROLE_NAMES[p.role]}`).join('\n')}`;
     if (USE_GAME_IMAGES) {
       try {
         await context.channel.send({ content: winMsg, files: [await drawGame(context, AllPlayers, "end", "citizen")] });
