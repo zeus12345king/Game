@@ -411,18 +411,18 @@ async function sendRoleMessages(context, players, AllPlayers) {
   const mafiaRoles = ['mafia_killer', 'mafia_godfather', 'mafia_silencer', 'mafia_regular'];
   const citizenRoles = ['doctor', 'detective', 'sniper', 'mayor', 'citizen'];
 
-  let summary = 'الفريق الأول: المواطنون\n';
-  citizenRoles.forEach(role => {
-    if (roleCounts[role]) {
-      summary += `# ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
-    }
-  });
-  summary += '\nالفريق الثاني: المافيا\n';
-  mafiaRoles.forEach(role => {
-    if (roleCounts[role]) {
-      summary += `# ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
-    }
-  });
+  let summary = '## الفريق الأول: المواطنون\n';
+citizenRoles.forEach(role => {
+  if (roleCounts[role]) {
+    summary += `- ### ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+  }
+});
+summary += '\n## الفريق الثاني: المافيا\n';
+mafiaRoles.forEach(role => {
+  if (roleCounts[role]) {
+    summary += `- ### ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+  }
+});
 
   await context.channel.send(summary);
 
