@@ -42,8 +42,8 @@ const EMOJI = {
   DOCTOR: '<:z23:1515877111754264769>',
   CITIZEN: '<:z18:1515279195201339392>',
   DETECTIVE: '<:z25:1515886763892281354>',
-  MAYOR: '🏛️',
-  SNIPER: '🎯',
+  MAYOR: '<:z28:1515892724673282201>',
+  SNIPER: '<:z29:1515892936196362364>',
   SILENCER: '🔇',
   VOTE: '<:z20:1515282515982815282>',
   WIN: '🏆',
@@ -62,6 +62,7 @@ const EMOJI = {
   SILENCED: '🤐',
   ANNOUNCE: '📢',
   ROLE_CARD: '🃏',
+  GOODFATHAR: '<:z26:1515891791038251109>',
   OK: '<:z1:1515940737760362648>',
 };
 
@@ -94,7 +95,7 @@ const ROLE_NAMES = {
 
 const ROLE_EMOJI = {
   mafia_killer: EMOJI.MAFIA,
-  mafia_godfather: EMOJI.MAFIA,
+  mafia_godfather: EMOJI.GOODFATHAR,
   mafia_silencer: EMOJI.SILENCER,
   mafia_regular: EMOJI.MAFIA,
   doctor: EMOJI.DOCTOR,
