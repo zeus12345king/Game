@@ -62,6 +62,7 @@ const EMOJI = {
   SILENCED: '🤐',
   ANNOUNCE: '📢',
   ROLE_CARD: '🃏',
+  OK: '<:z1:1515940737760362648>',
 };
 
 // ======================== أيقونات أرقام التصويت ========================
@@ -608,7 +609,7 @@ async function mafiaRound(context, players, AllPlayers, callback) {
     }
 
     // إرسال رسالة الاغتيال العامة
-    await context.channel.send(`${EMOJI.MAFIA} | تم اختيار الشخص الذي سيتم اغتياله من قبل المافيا: <@${chosenTarget.id}>`);
+    await context.channel.send(`${EMOJI.MAFIA} | تم اختيار الشخص الذي سيتم اغتياله من قبل المافيا`);
 
     // ==== جزء الإسكات (إن وجد المُسكِت) ====
     let silencedId = null;
@@ -1007,7 +1008,7 @@ async function gameRound(context, players, AllPlayers, callback) {
     if ((await checkWin(context, players, AllPlayers, callback)) === true) return;
 
     if (savedPlayer && killTarget.id === savedPlayer.id) {
-      await context.channel.send(`${EMOJI.PROTECT} | لقد نجح الطبيب في حماية <@${savedPlayer.id}> من الاغتيال!`);
+      await context.channel.send(`${EMOJI.OK} | لقد نجح الطبيب في حماية <@${savedPlayer.id}> من الاغتيال!`);
     } else {
       const roleName = ROLE_NAMES[killTarget.role] || 'مواطن';
       await context.channel.send(`${EMOJI.KILL} | لقد قتلت المافيا <@${killTarget.id}> وكان **${roleName}**`);
