@@ -364,29 +364,62 @@ function assignRoles(players) {
   const count = players.length;
   const roles = [];
 
+  // تحديد عدد المافيا
   let mafiaCount;
-  if (count <= 6) mafiaCount = 1;
-  else if (count <= 8) mafiaCount = 2;
-  else if (count <= 12) mafiaCount = 3;
-  else if (count <= 16) mafiaCount = 4;
-  else mafiaCount = 5;
+  if (count <= 5) {
+    mafiaCount = 1;
+  } else if (count <= 8) {
+    mafiaCount = 2;
+  } else if (count <= 12) {
+    mafiaCount = 3;
+  } else if (count <= 16) {
+    mafiaCount = 4;
+  } else {
+    mafiaCount = 5;
+  }
 
+  // إضافة أدوار المافيا
   roles.push('mafia_killer');
   if (mafiaCount >= 2) roles.push('mafia_godfather');
   if (mafiaCount >= 3) roles.push('mafia_silencer');
-  for (let i = 3; i < mafiaCount; i++) roles.push('mafia_regular');
+  // إضافة مافيا عاديين للعدد المتبقي
+  const extraMafia = mafiaCount - 3;
+  for (let i = 0; i < extraMafia; i++) {
+    roles.push('mafia_regular');
+  }
 
-  roles.push('doctor', 'detective');
-  if (count >= 9) roles.push('sniper');
-  if (count >= 10) roles.push('mayor');
+  // إضافة الأدوار الخاصة بالمواطنين
+  roles.push('doctor');
 
+  // المحقق يظهر فقط إذا كان عدد اللاعبين >= 4
+  if (count >= 4) {
+    roles.push('detective');
+  }
+
+  // العمدة يظهر عند >= 7
+  if (count >= 7) {
+    roles.push('mayor');
+  }
+
+  // القناص يظهر عند >= 9
+  if (count >= 9) {
+    roles.push('sniper');
+  }
+
+  // المواطنون يملؤون الباقي
   const remaining = count - roles.length;
-  for (let i = 0; i < remaining; i++) roles.push('citizen');
+  for (let i = 0; i < remaining; i++) {
+    roles.push('citizen');
+  }
 
+  // خلط وتوزيع عشوائي
   const shuffled = [...players].sort(() => Math.random() - 0.5);
   roles.sort(() => Math.random() - 0.5);
-  shuffled.forEach((player, i) => player.role = roles[i]);
+  shuffled.forEach((player, i) => {
+    player.role = roles[i];
+  });
 
+  // تعيين خصائص إضافية
   players.forEach(p => {
     if (p.role === 'sniper') p.hasBullet = true;
     else p.hasBullet = false;
