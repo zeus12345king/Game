@@ -414,13 +414,13 @@ async function sendRoleMessages(context, players, AllPlayers) {
   let summary = '## الفريق الأول: المواطنون\n';
 citizenRoles.forEach(role => {
   if (roleCounts[role]) {
-    summary += `- ### ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+    summary += `-  ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
   }
 });
 summary += '\n## الفريق الثاني: المافيا\n';
 mafiaRoles.forEach(role => {
   if (roleCounts[role]) {
-    summary += `- ### ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
+    summary += `-  ${ROLE_EMOJI[role] || ''} ${ROLE_NAMES[role] || role} ${roleCounts[role]}\n`;
   }
 });
 
