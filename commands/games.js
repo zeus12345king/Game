@@ -39,14 +39,19 @@ function buildGameContainer(type) {
     list = SOLO_GAMES.map(g => `${g.emoji} \`${prefix}${g.alias}\` — ${g.desc}`).join('\n');
   }
 
-  return new ContainerBuilder()
+  const container = new ContainerBuilder()
     .setAccentColor(0xD48A9C)
-    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}`))
-    .addMediaGalleryComponents(g => {
-      const img = config.gamesMenuImge;
-      if (img) g.addItems(item => item.setURL(img));
+    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}`));
+
+  const img = config.gamesMenuImage;
+  if (img) {
+    container.addMediaGalleryComponents(g => {
+      g.addItems(item => item.setURL(img));
       return g;
     });
+  }
+
+  return container;
 }
 
 function buildSelectMenu(type) {
