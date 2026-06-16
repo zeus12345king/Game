@@ -1,4 +1,4 @@
-const { ContainerBuilder, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { ContainerBuilder, StringSelectMenuBuilder, MessageFlags, ActionRowBuilder } = require('discord.js');
 const config = require('../config.js');
 
 const SOLO_GAMES = [
@@ -27,43 +27,49 @@ const GROUP_GAMES = [
   { alias: 'براالسالفة',  emoji: '🕵️', desc: 'لعبة برا السالفة' },
 ];
 
-function buildGameContainer(type, requesterId) {
+function buildGameContainer(type) {
   let title, list;
   const prefix = config.prefix;
 
   if (type === 'group') {
-    title = '👥 الألعاب الجماعية';
+    title = '<:z3:1516262248274722897> الألعاب الجماعية';
     list = GROUP_GAMES.map(g => `${g.emoji} \`${prefix}${g.alias}\` — ${g.desc}`).join('\n');
   } else {
-    title = '🎮 الألعاب الفردية';
+    title = '<:z3:1516262248274722897> الألعاب الفردية';
     list = SOLO_GAMES.map(g => `${g.emoji} \`${prefix}${g.alias}\` — ${g.desc}`).join('\n');
   }
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('games_switch')
-    .setPlaceholder('اختر نوع الألعاب')
-    .addOptions([
-      { label: 'ألعاب جماعية', value: 'group', default: type === 'group' },
-      { label: 'ألعاب فردية', value: 'solo', default: type === 'solo' },
-    ]);
-
   return new ContainerBuilder()
-    .setAccentColor(config.colors.roulette)
+    .setAccentColor(0xD48A9C)
+    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}`))
     .addMediaGalleryComponents(g => {
       const img = config.menuImage;
       if (img) g.addItems(item => item.setURL(img));
       return g;
-    })
-    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}\n-# طلب بواسطة <@${requesterId}>`))
-    .addActionRowComponents(r => r.setComponents(select));
+    });
+}
+
+function buildSelectMenu(type) {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('games_switch')
+    .setPlaceholder('اختر نوع الألعاب')
+    .addOptions([
+      { label: 'ألعاب جماعية', value: 'group', emoji: '<:z18:1515279195201339392>', default: type === 'group' },
+      { label: 'ألعاب فردية', value: 'solo', emoji: '<:z1:1511780346008436946>', default: type === 'solo' },
+    ]);
+
+  return new ActionRowBuilder().addComponents(select);
 }
 
 module.exports = {
   name: 'العاب',
   aliases: ['games', 'الالعاب', 'menu', 'منيو'],
   async execute(message) {
+    const container = buildGameContainer('group');
+    const row = buildSelectMenu('group');
+
     const sent = await message.reply({
-      components: [buildGameContainer('group', message.author.id)],
+      components: [container, row],
       flags: MessageFlags.IsComponentsV2,
       fetchReply: true,
     });
@@ -75,8 +81,10 @@ module.exports = {
 
     collector.on('collect', async i => {
       const newType = i.values[0];
+      const newContainer = buildGameContainer(newType);
+      const newRow = buildSelectMenu(newType);
       await i.update({
-        components: [buildGameContainer(newType, message.author.id)],
+        components: [newContainer, newRow],
         flags: MessageFlags.IsComponentsV2,
       });
     });
