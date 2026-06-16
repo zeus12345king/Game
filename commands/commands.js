@@ -23,7 +23,7 @@ const GENERAL_CMDS = [
   { cmd: 'ايقاف',  desc: 'إيقاف اللعبة النشطة' },
 ];
 
-function buildCommandsContainer(type, requesterId) {
+function buildCommandsContainer(type) {
   let title, list;
   const prefix = config.prefix;
 
@@ -36,8 +36,8 @@ function buildCommandsContainer(type, requesterId) {
   }
 
   const container = new ContainerBuilder()
-    .setAccentColor(0xD48A9C) // نفس لون أمر الألعاب
-    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}\n-# طلب بواسطة <@${requesterId}>\n**ملاحظة:** الأوامر الإدارية تتطلب صلاحية مدير أو الرتب المحددة في الإعدادات.`));
+    .setAccentColor(0xD48A9C)
+    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}`));
 
   const img = config.menuImage;
   if (img) {
@@ -66,7 +66,7 @@ module.exports = {
   name: 'اوامر',
   aliases: ['commands', 'help', 'مساعدة', 'الاوامر'],
   async execute(message) {
-    const container = buildCommandsContainer('general', message.author.id);
+    const container = buildCommandsContainer('general');
     const row = buildCommandsSelectMenu('general');
 
     const sent = await message.reply({
@@ -82,7 +82,7 @@ module.exports = {
 
     collector.on('collect', async i => {
       const newType = i.values[0];
-      const newContainer = buildCommandsContainer(newType, message.author.id);
+      const newContainer = buildCommandsContainer(newType);
       const newRow = buildCommandsSelectMenu(newType);
       await i.update({
         components: [newContainer, newRow],
