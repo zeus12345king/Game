@@ -5,11 +5,10 @@ const {
   InteractionWebhook,
   AttachmentBuilder,
   ContainerBuilder,
-  SeparatorBuilder,
+  EmbedBuilder,
   MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  EmbedBuilder,
 } = require("discord.js");
 const path = require("path");
 const db = require('../database.js');
@@ -67,21 +66,6 @@ const EMOJI = {
   OK: '<:z1:1515940737760362648>',
 };
 
-// ======================== أيقونات أرقام اللوبي (قابل للتخصيص) ========================
-const LOBBY_DIGIT_EMOJIS = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
-
-function numberToLobbyEmoji(num) {
-  if (num === 0) return LOBBY_DIGIT_EMOJIS[0];
-  let str = '';
-  let n = num;
-  while (n > 0) {
-    const digit = n % 10;
-    str = LOBBY_DIGIT_EMOJIS[digit] + str;
-    n = Math.floor(n / 10);
-  }
-  return str;
-}
-
 // ======================== أيقونات أرقام التصويت ========================
 const DIGIT_EMOJIS = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
 function numberToEmoji(num) {
@@ -95,6 +79,13 @@ function numberToEmoji(num) {
   }
   return str;
 }
+
+// ======================== إيموجيات اللوبي (يمكن تغييرها لإيموجيات مخصصة) ========================
+const LOBBY_EMOJI = {
+  JOIN: EMOJI.JOIN,      // استخدمنا نفس إيموجي الدخول الموجود
+  LEAVE: EMOJI.LEAVE,    // نفس إيموجي الخروج
+  // يمكن إضافة أرقام مخصصة هنا لاحقاً
+};
 
 // ======================== أسماء الأدوار ========================
 const ROLE_NAMES = {
@@ -133,25 +124,54 @@ const CITIZEN_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 // تعطيل الصور حالياً (ضع true لتفعيلها لاحقاً)
 const USE_GAME_IMAGES = false;
 
-// ======================== بناء لوبي المافيا ========================
-function buildMafiaLobbyEmbed(nowTime, players, guildName) {
-  const playersList = players.length
-    ? players.map((p, i) => `${numberToLobbyEmoji(i + 1)} <@${p.id}>`).join('\n')
-    : 'لا يوجد لاعبين بعد';
+// ======================== بناء لوبي المافيا (الإيمبد + الأزرار) ========================
+function buildMafiaLobby(nowTime, players, guildName) {
+  // بناء الإيمبد (ContainerBuilder كـ Embed)
+  const embedContainer = new ContainerBuilder()
+    .setAccentColor(0xD48A9C) // لون الإيمبد المطلوب
+    .addTextDisplayComponents(t => {
+      // العنوان: اسم السيرفر
+      let content = `## ${guildName}\n`;
+      // شرح اللعبة
+      content += `__**شرح اللعبة:**__\n`;
+      content += `1- انضم للعبة عبر الضغط على زر دخول ${LOBBY_EMOJI.JOIN} الموجود في الأسفل.\n`;
+      content += `2- كل لاعب يحصل على دور سري (مافيا، مواطن، طبيب، عمدة، قناص وغيرها).\n`;
+      content += `3- تتصرف الأدوار الخاصة سرياً: نهاراً يصوت الجميع لطرد مشتبه.\n`;
+      content += `4- يفوز المواطنون بإقصاء جميع القاتلين، المافيا تفوز إن تفوق عددهم على المواطنين المتنقين، بعض الأدوار لها هدف خاص.\n`;
+      // الوقت تحت شرح اللعبة
+      content += `\nالوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n`;
+      // عدد اللاعبين
+      content += `\n(${players.length}/${MAX_PLAYERS})\n`;
+      // قسم المشاركون حاليا
+      content += `\n**المشاركون حالياً:**\n`;
+      if (players.length === 0) {
+        content += `> لا يوجد لاعبين بعد`;
+      } else {
+        content += players.map((p, i) => `> ${DIGIT_EMOJIS[i + 1] || numberToEmoji(i + 1)} <@${p.id}>`).join('\n');
+      }
+      t.setContent(content);
+    })
+    .addMediaGalleryComponents(g => {
+      const img = config.lobbyImages.mafia;
+      if (img) g.addItems(item => item.setURL(img));
+      return g;
+    });
 
-  const description = 
-    `__**شرح اللعبة:**__\n` +
-    `1- انضم للعبة عبر الضغط على زر دخول ${EMOJI.JOIN} الموجود في الأسفل.\n` +
-    `2- كل لاعب يحصل على دور سري (مافيا، مواطن، طبيب، عمدة، قناص وغيرها).\n` +
-    `3- تتصرف الأدوار الخاصة سرياً: نهاراً يصوت الجميع لطرد مشتبه.\n` +
-    `4- يفوز المواطنون بإقصاء جميع القاتلين، المافيا تفوز إن تفوق عددهم على المواطنين المتنقين، بعض الأدوار لها هدف خاص.\n\n` +
-    `**عدد اللاعبين:** (${players.length}/${MAX_PLAYERS})\n\n` +
-    `**المشاركين حاليا:**\n${playersList}`;
+  // الأزرار خارج الإيمبد (ActionRow منفصل)
+  const actionRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("join")
+      .setEmoji(LOBBY_EMOJI.JOIN) // إيموجي الدخول
+      .setLabel("دخول")
+      .setStyle(ButtonStyle.Secondary), // لون رمادي
+    new ButtonBuilder()
+      .setCustomId("exit")
+      .setEmoji(LOBBY_EMOJI.LEAVE) // إيموجي الخروج
+      .setLabel("خروج")
+      .setStyle(ButtonStyle.Secondary) // لون رمادي
+  );
 
-  return new EmbedBuilder()
-    .setColor(0xD48A9C)
-    .setTitle(guildName)
-    .setDescription(description);
+  return [embedContainer, actionRow]; // نعيد مصفوفة المكونات
 }
 
 let GAME_ACTIVE = false;
@@ -279,21 +299,14 @@ async function lose(playerId, context) {
 
 async function startGame(context, nowTime, callback) {
   players = [];
-
   const guildName = context.guild?.name || 'السيرفر';
-
-  const embed = buildMafiaLobbyEmbed(nowTime, players, guildName);
-  const actionRow = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Secondary)
-    );
 
   let sentMessage;
   try {
+    const components = buildMafiaLobby(nowTime, players, guildName);
     sentMessage = await context.reply({
-      embeds: [embed],
-      components: [actionRow],
+      components: components,
+      flags: MessageFlags.IsComponentsV2,
       fetchReply: true,
     });
 
@@ -323,8 +336,8 @@ async function startGame(context, nowTime, callback) {
               hasBullet: false,
               silenced: false,
             });
-            const updatedEmbed = buildMafiaLobbyEmbed(nowTime, players, guildName);
-            await i.update({ embeds: [updatedEmbed], components: [actionRow] });
+            // تحديث الإيمبد فقط دون لمس الأزرار؟ الأزرار جزء من المكونات، سنعيد بناء الكل
+            await i.update({ components: buildMafiaLobby(nowTime, players, guildName), flags: MessageFlags.IsComponentsV2 });
           } else {
             await i.reply({ content: `${EMOJI.WARNING} أنت بالفعل في اللعبة!`, ephemeral: true });
           }
@@ -335,8 +348,7 @@ async function startGame(context, nowTime, callback) {
         const playerExists = players.some((player) => player.id === i.user.id);
         if (playerExists) {
           players = players.filter((player) => player.id !== i.user.id);
-          const updatedEmbed = buildMafiaLobbyEmbed(nowTime, players, guildName);
-          await i.update({ embeds: [updatedEmbed], components: [actionRow] });
+          await i.update({ components: buildMafiaLobby(nowTime, players, guildName), flags: MessageFlags.IsComponentsV2 });
         } else {
           await i.reply({ content: `${EMOJI.ERROR} لم تكن في اللعبة.`, ephemeral: true });
         }
@@ -344,13 +356,15 @@ async function startGame(context, nowTime, callback) {
     });
 
     collector.on("end", async () => {
-      // لا يتم تعديل رسالة اللوبي أبداً
+      // لا نعدل الرسالة الأصلية، فقط نرسل رسالة جديدة
       if (players.length < MIN_PLAYERS) {
         await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
         resetGameData();
         callback(null, false, 0, "Not enough players");
         return;
       } else {
+        // سيتم بدء اللعبة، نرسل رسالة جديدة أن الوقت انتهى
+        await context.channel.send(`${EMOJI.TIMER} | انتهى وقت الانضمام. جاري بدء اللعبة...`);
         assignRoles(players);
         const AllPlayers = [...players];
         await sendRoleMessages(context, players, AllPlayers);
