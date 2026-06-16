@@ -17,6 +17,9 @@ module.exports = {
   // صور وألوان 
 
   menuImage: 'https://timg.eu.cc/BR184u_RJz.png',
+  gamesMenuImage: 'https://iili.io/CoKoaG1.png',
+  
+  
 
   lobbyImages: {
     roulette:  'img/roulette.png', // روليت
