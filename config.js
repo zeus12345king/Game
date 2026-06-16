@@ -20,7 +20,7 @@ module.exports = {
 
   lobbyImages: {
     roulette:  'img/roulette.png', // روليت
-    mafia:     'https://timg.eu.cc/7BqRG30LFH.png', // مافيا 
+    mafia:     'https://iili.io/Co36OWg.png', // مافيا 
     dice:      'https://timg.eu.cc/jYFN4GK30G.png', // نرد 
     hide:      'https://timg.eu.cc/vBgwQ-NM-I.png', // هايد او غميضة 
     rps:       'https://timg.eu.cc/F6skdkx7Z5.png', // حجرة ورقة مقص 
