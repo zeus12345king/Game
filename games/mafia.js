@@ -9,6 +9,7 @@ const {
   MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  EmbedBuilder,
 } = require("discord.js");
 const path = require("path");
 const db = require('../database.js');
@@ -66,6 +67,21 @@ const EMOJI = {
   OK: '<:z1:1515940737760362648>',
 };
 
+// ======================== أيقونات أرقام اللوبي (قابل للتخصيص) ========================
+const LOBBY_DIGIT_EMOJIS = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
+
+function numberToLobbyEmoji(num) {
+  if (num === 0) return LOBBY_DIGIT_EMOJIS[0];
+  let str = '';
+  let n = num;
+  while (n > 0) {
+    const digit = n % 10;
+    str = LOBBY_DIGIT_EMOJIS[digit] + str;
+    n = Math.floor(n / 10);
+  }
+  return str;
+}
+
 // ======================== أيقونات أرقام التصويت ========================
 const DIGIT_EMOJIS = ['0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣'];
 function numberToEmoji(num) {
@@ -118,30 +134,24 @@ const CITIZEN_WIN_BANNER = path.join(__dirname, "../img/mafia/lobby.png");
 const USE_GAME_IMAGES = false;
 
 // ======================== بناء لوبي المافيا ========================
-function buildMafiaLobby(nowTime, players) {
-  const list = players.length
-    ? players.map((p, i) => `> **${i + 1}.** <@${p.id}>`).join('\n')
-    : '> لا يوجد لاعبين بعد';
+function buildMafiaLobbyEmbed(nowTime, players, guildName) {
+  const playersList = players.length
+    ? players.map((p, i) => `${numberToLobbyEmoji(i + 1)} <@${p.id}>`).join('\n')
+    : 'لا يوجد لاعبين بعد';
 
-  return new ContainerBuilder()
-    .setAccentColor(config.colors.mafia)
-    .addTextDisplayComponents(t =>
-      t.setContent(
-        `## ${EMOJI.LOBBY} لعبة المافيا\n> الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
-        `**اللاعبون (${players.length}/${MAX_PLAYERS}):**\n${list}`
-      )
-    )
-    .addMediaGalleryComponents(g => {
-      const img = config.lobbyImages.mafia;
-      if (img) g.addItems(item => item.setURL(img));
-      return g;
-    })
-    .addActionRowComponents(r =>
-      r.setComponents(
-        new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Danger)
-      )
-    );
+  const description = 
+    `__**شرح اللعبة:**__\n` +
+    `1- انضم للعبة عبر الضغط على زر دخول ${EMOJI.JOIN} الموجود في الأسفل.\n` +
+    `2- كل لاعب يحصل على دور سري (مافيا، مواطن، طبيب، عمدة، قناص وغيرها).\n` +
+    `3- تتصرف الأدوار الخاصة سرياً: نهاراً يصوت الجميع لطرد مشتبه.\n` +
+    `4- يفوز المواطنون بإقصاء جميع القاتلين، المافيا تفوز إن تفوق عددهم على المواطنين المتنقين، بعض الأدوار لها هدف خاص.\n\n` +
+    `**عدد اللاعبين:** (${players.length}/${MAX_PLAYERS})\n\n` +
+    `**المشاركين حاليا:**\n${playersList}`;
+
+  return new EmbedBuilder()
+    .setColor(0xD48A9C)
+    .setTitle(guildName)
+    .setDescription(description);
 }
 
 let GAME_ACTIVE = false;
@@ -270,11 +280,20 @@ async function lose(playerId, context) {
 async function startGame(context, nowTime, callback) {
   players = [];
 
+  const guildName = context.guild?.name || 'السيرفر';
+
+  const embed = buildMafiaLobbyEmbed(nowTime, players, guildName);
+  const actionRow = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Secondary)
+    );
+
   let sentMessage;
   try {
     sentMessage = await context.reply({
-      components: [buildMafiaLobby(nowTime, players)],
-      flags: MessageFlags.IsComponentsV2,
+      embeds: [embed],
+      components: [actionRow],
       fetchReply: true,
     });
 
@@ -304,7 +323,8 @@ async function startGame(context, nowTime, callback) {
               hasBullet: false,
               silenced: false,
             });
-            await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+            const updatedEmbed = buildMafiaLobbyEmbed(nowTime, players, guildName);
+            await i.update({ embeds: [updatedEmbed], components: [actionRow] });
           } else {
             await i.reply({ content: `${EMOJI.WARNING} أنت بالفعل في اللعبة!`, ephemeral: true });
           }
@@ -315,7 +335,8 @@ async function startGame(context, nowTime, callback) {
         const playerExists = players.some((player) => player.id === i.user.id);
         if (playerExists) {
           players = players.filter((player) => player.id !== i.user.id);
-          await i.update({ components: [buildMafiaLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+          const updatedEmbed = buildMafiaLobbyEmbed(nowTime, players, guildName);
+          await i.update({ embeds: [updatedEmbed], components: [actionRow] });
         } else {
           await i.reply({ content: `${EMOJI.ERROR} لم تكن في اللعبة.`, ephemeral: true });
         }
@@ -323,21 +344,7 @@ async function startGame(context, nowTime, callback) {
     });
 
     collector.on("end", async () => {
-      try {
-        const closedContainer = new ContainerBuilder()
-          .setAccentColor(0x5865F2)
-          .addTextDisplayComponents(t => t.setContent(
-            `## ${EMOJI.LOBBY} لعبة المافيا\n**انتهى وقت الانضمام!**\n\nاللاعبون: ${players.length ? players.map(p => `<@${p.id}>`).join(', ') : 'لا يوجد'}`
-          ))
-          .addActionRowComponents(r => r.setComponents(
-            new ButtonBuilder().setCustomId("join").setLabel("دخول").setStyle(ButtonStyle.Success).setDisabled(true),
-            new ButtonBuilder().setCustomId("exit").setLabel("خروج").setStyle(ButtonStyle.Danger).setDisabled(true)
-          ));
-        await sentMessage.edit({ components: [closedContainer], flags: MessageFlags.IsComponentsV2 });
-      } catch (error) {
-        console.error("Failed to close lobby:", error);
-      }
-
+      // لا يتم تعديل رسالة اللوبي أبداً
       if (players.length < MIN_PLAYERS) {
         await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
         resetGameData();
