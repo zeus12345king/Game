@@ -43,7 +43,7 @@ function buildGameContainer(type) {
     .setAccentColor(0xD48A9C)
     .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}`))
     .addMediaGalleryComponents(g => {
-      const img = config.‏gamesMenuImage;
+      const img = config.‏gamesMenuImge;
       if (img) g.addItems(item => item.setURL(img));
       return g;
     });
