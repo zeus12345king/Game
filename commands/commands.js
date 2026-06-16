@@ -36,7 +36,7 @@ function buildCommandsContainer(type, requesterId) {
   }
 
   const container = new ContainerBuilder()
-    .setAccentColor(config.colors.roulette)
+    .setAccentColor(0xD48A9C) // نفس لون أمر الألعاب
     .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}\n-# طلب بواسطة <@${requesterId}>\n**ملاحظة:** الأوامر الإدارية تتطلب صلاحية مدير أو الرتب المحددة في الإعدادات.`));
 
   const img = config.menuImage;
