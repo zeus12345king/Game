@@ -1,4 +1,4 @@
-const { ContainerBuilder, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
+const { ContainerBuilder, StringSelectMenuBuilder, MessageFlags, ActionRowBuilder } = require('discord.js');
 const config = require('../config.js');
 
 const ADMIN_CMDS = [
@@ -35,6 +35,22 @@ function buildCommandsContainer(type, requesterId) {
     list = GENERAL_CMDS.map(c => `\`${prefix}${c.cmd}\` — ${c.desc}`).join('\n');
   }
 
+  const container = new ContainerBuilder()
+    .setAccentColor(config.colors.roulette)
+    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}\n-# طلب بواسطة <@${requesterId}>\n**ملاحظة:** الأوامر الإدارية تتطلب صلاحية مدير أو الرتب المحددة في الإعدادات.`));
+
+  const img = config.menuImage;
+  if (img) {
+    container.addMediaGalleryComponents(g => {
+      g.addItems(item => item.setURL(img));
+      return g;
+    });
+  }
+
+  return container;
+}
+
+function buildCommandsSelectMenu(type) {
   const select = new StringSelectMenuBuilder()
     .setCustomId('commands_switch')
     .setPlaceholder('اختر نوع الأوامر')
@@ -43,23 +59,18 @@ function buildCommandsContainer(type, requesterId) {
       { label: 'الأوامر الإدارية', value: 'admin', default: type === 'admin' },
     ]);
 
-  return new ContainerBuilder()
-    .setAccentColor(config.colors.roulette)
-    .addMediaGalleryComponents(g => {
-      const img = config.menuImage;
-      if (img) g.addItems(item => item.setURL(img));
-      return g;
-    })
-    .addTextDisplayComponents(t => t.setContent(`## ${title}\n${list}\n-# طلب بواسطة <@${requesterId}>\n**ملاحظة:** الأوامر الإدارية تتطلب صلاحية مدير أو الرتب المحددة في الإعدادات.`))
-    .addActionRowComponents(r => r.setComponents(select));
+  return new ActionRowBuilder().addComponents(select);
 }
 
 module.exports = {
   name: 'اوامر',
   aliases: ['commands', 'help', 'مساعدة', 'الاوامر'],
   async execute(message) {
+    const container = buildCommandsContainer('general', message.author.id);
+    const row = buildCommandsSelectMenu('general');
+
     const sent = await message.reply({
-      components: [buildCommandsContainer('general', message.author.id)],
+      components: [container, row],
       flags: MessageFlags.IsComponentsV2,
       fetchReply: true,
     });
@@ -71,8 +82,10 @@ module.exports = {
 
     collector.on('collect', async i => {
       const newType = i.values[0];
+      const newContainer = buildCommandsContainer(newType, message.author.id);
+      const newRow = buildCommandsSelectMenu(newType);
       await i.update({
-        components: [buildCommandsContainer(newType, message.author.id)],
+        components: [newContainer, newRow],
         flags: MessageFlags.IsComponentsV2,
       });
     });
