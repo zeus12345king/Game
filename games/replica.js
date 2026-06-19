@@ -23,14 +23,14 @@ const EMOJI = {
   WIN: '🏆',                                 // فوز
   LOSE: '💀',                               // خسارة
   OK: '<:z1:1515940737760362648>',          // موافقة / تم
-  ANNOUNCE: '<:z11:1512224011357126948>',                           // إعلان (حرف جديد مثلاً)
+  ANNOUNCE: '<:z11:1512224011357126948>',   // إعلان (حرف جديد مثلاً)
   BULLET: '💥',                             // غير مستخدم حالياً لكنه محجوز
-  PLAYER_JOIN: '<:z3:1511872921142825040>',                        // رسالة تأكيد انضمام
+  PLAYER_JOIN: '<:z3:1511872921142825040>',// رسالة تأكيد انضمام
   PLAYER_LEAVE: '👋',                       // رسالة تأكيد خروج
   QUESTION_MARK: '❓',                      // لم تكن في اللعبة
   FULL_GAME: '🚪',                          // اللعبة ممتلئة
-  ALREADY_IN: '<:z16:1515274356845056162>',                         // موجود مسبقاً
-  PLAYERS: '<:z18:1515279195201339392>',                            // أيقونة اللاعبين (يمكن استبدالها بإيموجي مخصص من السيرفر)
+  ALREADY_IN: '<:z16:1515274356845056162>', // موجود مسبقاً
+  PLAYERS: '<:z18:1515279195201339392>',    // أيقونة اللاعبين
 };
 
 // ======================== أيقونات أرقام مخصصة للوبي فقط ========================
@@ -66,6 +66,19 @@ function parseCustomEmoji(emojiString) {
     return { id: match[1], name: emojiString.split(':')[1], animated: emojiString.startsWith('<a:') };
   }
   return null;
+}
+
+// دالة لتحويل الرقم إلى ترتيبي (الأولى، الثانية، ...)
+function arabicOrdinal(n) {
+  const ordinals = [
+    "الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة",
+    "السادسة", "السابعة", "الثامنة", "التاسعة", "العاشرة",
+    "الحادية عشرة", "الثانية عشرة", "الثالثة عشرة", "الرابعة عشرة",
+    "الخامسة عشرة", "السادسة عشرة", "السابعة عشرة", "الثامنة عشرة",
+    "التاسعة عشرة", "العشرون"
+  ];
+  if (n <= 20) return ordinals[n - 1] || `رقم ${n}`;
+  return `رقم ${n}`;
 }
 
 // ======================== إعدادات اللعبة ========================
@@ -130,15 +143,12 @@ async function win(playerId, context) {
 }
 async function lose(playerId, context) { }
 
-// ======================== بناء واجهة اللوبي (بنفس تصميم المافيا) ========================
+// ======================== بناء واجهة اللوبي ========================
 async function startGame(context, nowTime, callback) {
   players = [];
 
-  function buildLobby(time, lobbyPlayers) {
-    const joinEmoji = parseCustomEmoji(EMOJI.JOIN);
-    const leaveEmoji = parseCustomEmoji(EMOJI.LEAVE);
-
-    // شرح اللعبة مثل المافيا
+  // بناء الإيمبد فقط (بدون أزرار)
+  function buildLobbyEmbed(time, lobbyPlayers) {
     const description = [
       `__**شرح اللعبة:**__`,
       `1- انضم للعبة عبر الضغط على زر دخول ${EMOJI.JOIN} الموجود في الأسفل.`,
@@ -154,29 +164,33 @@ async function startGame(context, nowTime, callback) {
       (lobbyPlayers.length ? lobbyPlayers.map((p, i) => `> ${lobbyNumberEmoji(i + 1)} <@${p.id}>`).join('\n') : `> لا يوجد لاعبين بعد`)
     ].join('\n');
 
-    const container = new ContainerBuilder()
+    return new ContainerBuilder()
       .setAccentColor(config.colors.replica)
       .addTextDisplayComponents(t => t.setContent(description))
       .addMediaGalleryComponents(g => {
         const img = config.lobbyImages.replica;
         if (img) g.addItems(item => item.setURL(img));
         return g;
-      })
-      .addActionRowComponents(r => {
-        const joinBtn = new ButtonBuilder().setCustomId('join').setLabel('دخول').setStyle(ButtonStyle.Secondary);
-        if (joinEmoji) joinBtn.setEmoji({ id: joinEmoji.id, name: joinEmoji.name, animated: false });
-
-        const leaveBtn = new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Secondary);
-        if (leaveEmoji) leaveBtn.setEmoji({ id: leaveEmoji.id, name: leaveEmoji.name, animated: false });
-
-        return r.setComponents(joinBtn, leaveBtn);
       });
-
-    return container;
   }
 
+  // بناء صف الأزرار
+  function buildActionRow() {
+    const joinEmoji = parseCustomEmoji(EMOJI.JOIN);
+    const leaveEmoji = parseCustomEmoji(EMOJI.LEAVE);
+
+    const joinBtn = new ButtonBuilder().setCustomId('join').setLabel('دخول').setStyle(ButtonStyle.Secondary);
+    if (joinEmoji) joinBtn.setEmoji({ id: joinEmoji.id, name: joinEmoji.name, animated: false });
+
+    const leaveBtn = new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Secondary);
+    if (leaveEmoji) leaveBtn.setEmoji({ id: leaveEmoji.id, name: leaveEmoji.name, animated: false });
+
+    return new ActionRowBuilder().setComponents(joinBtn, leaveBtn);
+  }
+
+  // إرسال رسالة واحدة تحتوي على الإيمبد والأزرار معاً
   const sentMessage = await context.reply({
-    components: [buildLobby(nowTime, players)],
+    components: [buildLobbyEmbed(nowTime, players), buildActionRow()],
     flags: MessageFlags.IsComponentsV2,
     fetchReply: true,
   });
@@ -193,7 +207,8 @@ async function startGame(context, nowTime, callback) {
             displayName: i.user.displayName,
             avatarURL: i.user.displayAvatarURL({ extension: "png", forceStatic: true }) || "https://cdn.discordapp.com/embed/avatars/0.png",
           });
-          await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+          // تحديث الإيمبد مع الإبقاء على الأزرار
+          await i.update({ components: [buildLobbyEmbed(nowTime, players), buildActionRow()], flags: MessageFlags.IsComponentsV2 });
           await i.followUp({ content: `${EMOJI.PLAYER_JOIN} لقد انضممت إلى اللعبة!`, ephemeral: true });
         } else {
           await i.reply({ content: `${EMOJI.ALREADY_IN} أنت بالفعل في اللعبة!`, ephemeral: true });
@@ -204,7 +219,7 @@ async function startGame(context, nowTime, callback) {
     } else if (i.customId === "exit") {
       if (players.some(p => p.id === i.user.id)) {
         players = players.filter((p) => p.id !== i.user.id);
-        await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+        await i.update({ components: [buildLobbyEmbed(nowTime, players), buildActionRow()], flags: MessageFlags.IsComponentsV2 });
         await i.followUp({ content: `${EMOJI.PLAYER_LEAVE} لقد غادرت اللعبة.`, ephemeral: true });
       } else {
         await i.reply({ content: `${EMOJI.QUESTION_MARK} لم تكن في اللعبة.`, ephemeral: true });
@@ -213,14 +228,10 @@ async function startGame(context, nowTime, callback) {
   });
 
   collector.on("end", async () => {
-    try {
-      const endContainer = new ContainerBuilder()
-        .setAccentColor(0x5865F2)
-        .addTextDisplayComponents(t => t.setContent(
-          `## ${EMOJI.LOBBY} لعبة ريبلكا\n**انتهى وقت الانضمام للعبة!**\n\n**اللاعبون المشاركون (${players.length}):** ${players.length > 0 ? players.map(p => `<@${p.id}>`).join(', ') : 'لا يوجد'}`
-        ));
-      await sentMessage.edit({ components: [endContainer], flags: MessageFlags.IsComponentsV2 });
-    } catch (error) { /* ignore */ }
+    // إرسال رسالة جديدة عند انتهاء الوقت، دون تعديل رسالة اللوبي
+    await context.channel.send(
+      `## ${EMOJI.LOBBY} لعبة ريبلكا\n**انتهى وقت الانضمام للعبة!**\n\n**اللاعبون المشاركون (${players.length}):** ${players.length > 0 ? players.map(p => `<@${p.id}>`).join(', ') : 'لا يوجد'}`
+    );
 
     if (players.length < MIN_PLAYERS) {
       await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
@@ -229,30 +240,30 @@ async function startGame(context, nowTime, callback) {
       return;
     }
 
-    // رسالة بداية اللعبة (مثل تصميم المافيا)
+    // رسالة بداية اللعبة
     await context.channel.send(`${EMOJI.SUCCESS} | تم تسجيل اللاعبين، ستبدأ الجولة الأولى بعد قليل...`);
-    const allPlayersMentions = players.map(p => `<@${p.id}>`).join(' ');
-    await context.channel.send(`${EMOJI.PLAYERS} **اللاعبون المشاركون:**\n${allPlayersMentions}`);
+    const playersListMessage = players.map(p => `- <@${p.id}>`).join('\n');
+    await context.channel.send(`## ${EMOJI.PLAYERS} اللاعبون المشاركون\n${playersListMessage}`);
     await sleep(3000);
 
     await context.channel.send(`${EMOJI.OK} | اكتمل عدد اللاعبين! اللعبة ستبدأ الآن...`);
-    await gameLoop(context, callback, 0); // نبدأ من الحرف الأول (أ)
+    await gameLoop(context, callback, 0, 0);
   });
 }
 
 // ======================== الحلقة الرئيسية (مع ترتيب الحروف) ========================
-async function gameLoop(context, callback, letterIndex) {
+async function gameLoop(context, callback, letterIndex, roundNumber) {
     if (await checkWin(context, callback)) return;
 
-    const nextIndex = await runLetterRound(context, callback, letterIndex);
+    roundNumber++;
+    const nextIndex = await runLetterRound(context, callback, letterIndex, roundNumber);
 
-    // *** التعديل الأول: إذا انتهت اللعبة أثناء الجولة، توقف فوراً ***
     if (!GAME_ACTIVE) return;
 
     await sleep(4000);
 
     if (nextIndex < ARABIC_LETTERS.length) {
-        await gameLoop(context, callback, nextIndex);
+        await gameLoop(context, callback, nextIndex, roundNumber);
     } else {
         await context.channel.send(`${EMOJI.SKIP} انتهت جميع الحروف دون فائز وحيد.`);
         resetGameData();
@@ -260,56 +271,44 @@ async function gameLoop(context, callback, letterIndex) {
     }
 }
 
-async function runLetterRound(context, callback, letterIndex) {
+async function runLetterRound(context, callback, letterIndex, roundNumber) {
     const letter = ARABIC_LETTERS[letterIndex];
     await context.channel.send(`${EMOJI.ANNOUNCE} حرف هذه الجولة هو **${letter}**`);
     await sleep(2000);
 
-    // تحديد التصنيفات النشطة (إذا كان للحرف دولة تبدأ به)
     const countryExists = await checkCountryExists(letter);
     const activeCategories = ['اسم إنسان', 'اسم حيوان', 'اسم نبات', 'اسم جماد'];
     if (countryExists) {
         activeCategories.push('اسم دولة');
     }
 
-    // ترتيب اللاعبين بشكل عشوائي ثم التناوب الدائري
     const playerQueue = [...players].sort(() => 0.5 - Math.random());
 
     for (const category of activeCategories) {
-        // إذا لم يبقَ لاعبون نكسر الحلقة
         if (playerQueue.length === 0) break;
-
-        // قبل السؤال عن الفئة، نتحقق من الفوز (لاعب واحد متبقٍ)
         if (await checkWin(context, callback)) return letterIndex + 1;
 
-        // نأخذ اللاعب التالي من الطابور
         const currentPlayer = playerQueue.shift();
-
         const survived = await askQuestion(context, currentPlayer, letter, category);
 
         if (!survived) {
-            // إخراج اللاعب من القائمة الرئيسية
             players = players.filter(p => p.id !== currentPlayer.id);
             await lose(currentPlayer.id, context);
-            // اللاعب الذي خرج لا يعاد إلى الطابور
         } else {
-            // إذا أجاب صحيحاً يعاد إلى نهاية الطابور ليمثل في فئات أخرى إن تطلب الأمر
             playerQueue.push(currentPlayer);
         }
 
         await sleep(2000);
     }
 
-    // *** التعديل الثاني: إذا انتهت اللعبة خلال الجولة، لا تظهر رسالة المتبقين وتوقف ***
     if (!GAME_ACTIVE) return letterIndex + 1;
 
-    // رسالة اللاعبين المتبقين بعد نهاية الجولة (إذا لم تنتهِ اللعبة بعد)
     if (players.length > 1) {
-        const remainingMentions = players.map(p => `<@${p.id}>`).join(' ');
-        await context.channel.send(`${EMOJI.PLAYERS} **اللاعبون المتبقون بعد الجولة:**\n${remainingMentions}`);
+        const remainingList = players.map(p => `- <@${p.id}>`).join('\n');
+        await context.channel.send(`## ${EMOJI.PLAYERS} اللاعبون المتبقون بعد الجولة ${arabicOrdinal(roundNumber)}\n${remainingList}`);
     }
 
-    return letterIndex + 1; // الحرف التالي
+    return letterIndex + 1;
 }
 
 async function askQuestion(context, player, letter, category) {
@@ -324,7 +323,6 @@ async function askQuestion(context, player, letter, category) {
         collector.on('collect', async (msg) => {
             const answer = msg.content.trim();
 
-            // فحص أولي: إذا كانت الكلمة مستخدمة سابقاً => مرفوضة فوراً
             if (usedWords.includes(answer)) {
                 await msg.reply(`${EMOJI.ERROR} الكلمة "${answer}" سبق استخدامها! تم طردك.`);
                 resolve(false);
@@ -346,7 +344,7 @@ async function askQuestion(context, player, letter, category) {
             }
 
             if (isValid) {
-                usedWords.push(answer); // تسجيل الكلمة الصحيحة
+                usedWords.push(answer);
                 await msg.reply(`${EMOJI.OK} إجابة <@${player.id}> صحيحة!`);
                 resolve(true);
             } else {
@@ -364,7 +362,7 @@ async function askQuestion(context, player, letter, category) {
     });
 }
 
-// ======================== التحقق بالذكاء الاصطناعي (بدون تغيير) ========================
+// ======================== التحقق بالذكاء الاصطناعي ========================
 async function validateAnswer(letter, category, answer) {
     const prompt = `
 نحن نلعب لعبة "نبات جماد حيوان".
@@ -418,9 +416,8 @@ async function validateAnswer(letter, category, answer) {
     }
 }
 
-// ======================== التحقق من وجود دولة تبدأ بحرف معين ========================
+// ======================== التحقق من وجود دولة ========================
 async function checkCountryExists(letter) {
-    // استخدام التخزين المؤقت لتجنب تكرار النداء
     if (countryCache[letter] !== undefined) {
         return countryCache[letter];
     }
@@ -457,7 +454,6 @@ async function checkCountryExists(letter) {
         return exists;
     } catch (error) {
         console.error("❌ Error checking country existence:", error);
-        // في حال الفشل نفترض عدم وجود دولة (أمان)
         countryCache[letter] = false;
         return false;
     }
