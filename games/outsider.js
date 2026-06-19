@@ -12,6 +12,9 @@ const {
   StringSelectMenuOptionBuilder,
   ContainerBuilder,
   TextDisplayBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   MessageFlags,
   InteractionWebhook,
   AttachmentBuilder,
@@ -22,6 +25,49 @@ const config = require('../config.js');
 const path   = require('path');
 const https  = require('https');
 const http   = require('http');
+
+// ─── مركز الإيموجيات (جميع الإيموجيات المستخدمة في اللعبة) ─────
+const EMOJIS = {
+  // إيموجيات مخصصة من السيرفر
+  z1: '<:z1:1511780346008436946>',
+  z2: '<:z2:1511780387506880542>',
+  z3: '<:z3:1511872921142825040>',
+
+  // إيموجيات يونيكود عامة
+  classic:      '🎯',
+  questions:    '❓',
+  mission:      '💣',
+  double:       '🕵️‍♂️',
+  modeSelect:   '🎮',
+  voteRequest:  '🗳️',
+  noSuspect:    '🤷',
+  trophy:       '🏆',
+  bolt:         '⚡',
+  fire:         '🔥',
+  summary:      '📋',
+  reveal:       '📊',
+  speech:       '💬',
+  investigate:  '🔍',
+  sending:      '📨',
+  correct:      '✅',
+  warning:      '⚠️',
+  timeout:      '⏰',
+  dice:         '🎲',
+  locked:       '🔒',
+  redCircle:    '🔴',
+  greenCircle:  '🟢',
+  microphone:   '🎤',
+  bot:          '🤖',
+  spyIcon:      '🕵️',
+  bullet:       '🔸',
+  ping:         '📌',
+  points:       '🏅',
+  hide:         '🙈',
+  eyes:         '👀',
+  check:        '☑️',
+  cross:        '❌',
+  stop:         '⛔',
+};
 
 // ─── ثوابت ───────────────────────────────────────────────────────
 const MIN_PLAYERS   = 3;
@@ -34,10 +80,6 @@ const TIMES = {
   questions: { answer: 50_000, vote: 25_000, minRounds: 4 },
   mission:   { discuss: 60_000, vote: 30_000 },
 };
-
-// إيموجيات مستعارة من الروليت
-const Z1_EMOJI = "<:z1:1511780346008436946>";
-const Z2_EMOJI = "<:z2:1511780387506880542>";
 
 // ─── الكلمات مُصنَّفة ─────────────────────────────────────────────
 const WORD_BANK = {
@@ -276,7 +318,6 @@ const WORD_BANK = {
   ],
 
 '🎬 شخصيات كرتونية وأنمي ومانهوا': [
-  // --- كارتون غربي (كلاسيكيات وحديث) ---
   'ميكي ماوس','بوتي (ميكي)','دونالد داك','بطوط','بطوطة','زيزو','عبقري','بندق','محظوظ','بومبي',
   'توم (توم وجيري)','جيري','سلة مهملات','سبايك','باغز باني','دافي داك','مارفن المريخي','العم سام','يوسميتي سام','باباي',
   'جان (كابتن ماجد)','كابتن ماجد','سوبرمان','باتمان','الرجل العنكبوت','الرجل الحديدي','وولفيرين','ثور','هالك','كابتن أمريكا',
@@ -287,8 +328,6 @@ const WORD_BANK = {
   'بوش','أليس (مدرسة الأوادم)','أناستازيا','سندريلا','سنو وايت','ملكة الثلج','إلسا','آنا','رابونزل','فلين رايدر',
   'موفاسا (الأسد الملك)','سيمبا','تيمون','بومبا','سكار','أرملة','نالا','وودي (حكاية لعبة)','باز الضوء','جيسي',
   'بوش (سيارة الأبطال)','لايتنينغ ماكوين','ماتر','دوك هدسون','سالي كاريرا','مايك (شركة المرعبين)','سالي','جيمس سوليفان','راندال','بوبّي',
-  
-  // --- أنمي كلاسيكي وشونين ---
   'غوكو (دراغون بول)','فيجيتا','بيكولو','غوهان','غوتين','ترانكس','سيل','فريزر','ماجين بوو','السيد ساتان',
   'ناروتو أوزوماكي','ساسكي أوتشيها','ساكورا هارونو','كاكاشي هاتاكي','جيرايا','أوروتشيمارو','تسونادي','مادارا أوتشيها','أوبيتو أوتشيها','إيتاشي أوتشيها',
   'مونكي دي لوفي (ون بيس)','رورونوا زورو','نامي','أوسوب','سانجي','توني توني تشوبر','نيكو روبن','فرانكي','بروك','جينبي',
@@ -299,36 +338,26 @@ const WORD_BANK = {
   'الإخوة إلمريك (فولميتال ألكماست)','إدورد إلمريك','ألفونس إلمريك','روي ماستانغ','ريزا هوكاي','أليكس لويس أرمسترونغ','سكار','والتر هوينهايم','شو توكر','أوليفييه أرمسترونغ',
   'سيتو كايبا (اللعبة الظل)','يوجي موتو','جونوتشي','ماي فالنتين','ماريك إيشوتار','باكورا','أكيتسو','أوبا','تريستان','بارتز بوبو',
   'سيكي (تلميذ الملك)','ميراي كورياما','هيسلين','والتر','أديل شتاين','سبيريت ألبارن','ميدوسا','عزرا','كرو','فرانكنشتاين',
-
-  // --- أنمي خيال وسيكولوجي ---
   'لايت ياغامي (دياث نوت)','ميسا أماني','لولايت','ريبم','نيار','واتاري','سويشيرو ياغامي','كيامي ميكامي','ماتسودا','ميكي',
   'كين كانيكي (طوكيو غول)','توكا كيريشيما','هيسي ناغاتشيكا','شينوهارا','ياموري','أمون كوتارو','جووزو سوزويا','ريزي','إيتوري','نورو',
   'سبايك شبيغل (كاوبوي بيبوب)','فيو فالنتاين','جيت بلاك','إدوارد وونغ هو باي','إين','فيسنت','جوليا','غرينفالكون','لين','بيت',
   'ميكا (الرجل الآلي زيرو)','المجند 2B','9S','باسكال','آدم','إيف','القيادة','ليلي','جوم','بوب',
   'أيا (فيروزية)','ريكو (صنعت في القاع)','ريج','ناناشي','بوندرويد','فويتش','كاباني (كوميكو)','جيابار','وازو','بليف',
-  
-  // --- أنمي رومنسي ورياضة ---
   'كوو ناغيسا (كلاناد)','تومويا أوكازاكي','فوكو إيبوكي','كوتومي إيتشينوسي','أوي كودا','ناغيسا فوروكاوا','إيوازاكي ميي','ساني','رجوعي','آسومي',
   'تورو (فرقة الموتى)','يوتسوبا ناكانو','ميكو ناكانو','إيتشيغو ناكانو','نويتسو ناكانو','تاكا توشي','شيريتا','موتشي','باناي','غوباي',
   'هيناتا شويو (هايكيو)','توبيو كاغياما','كيشي تسوكيشيما','ريونوسكي تاناكا','يوتشي نيشينويا','أوسامو ساكوسا','كوراكو','أوتسو','بوكوتو','أراي',
   'إيوايزومي هاجيمي (كيس)','أوتويا تشيكا (غيت)','دايتشي ساوامورا','تيتسويا كورو','كوسي','نيكو يوكي','كينجي','شيزو','توموي','سوغو',
   'كاكيرو (رنين الصمت)','إيشيدا شويا','شوكو نيشيميا','ناوكو أويما','ميو ناشيميا','ساتوشي ماشيبا','ميوكي','كازوكي شيمادا','توموهيرو','يوزورو',
-
-  // --- أنمي شوجو وأيشيكاي ---
   'عسا يوكي (فروتس باسكت)','كيو سوما','توهرو هوندا','يوكي سوما','هاتسوهارو سوما','أكيتو سوما','كاغورا سوما','ري سوما','مومي سوما','جيتسو سوما',
   'أوساغي تسوكينو (حارسة القمر)','لونا','آرتيميس','تشيب مو','الأميرة سيرينيتي','تاكسيدو ماسك','ميتو','راي','ميناكو','ماكوتو',
   'شيوري (آنجيل بيتس)','كانادي يوزورو','يوري ناكامورا','هيناتا هيديكي','نودا','كوروكي','أويياما','إيواساوا','سيكيشي','تاكاماتسو',
   'ميوكي شيبا (فامبير نايت)','زانو كروس','يوكي كروس','أيدو كاين','كايتو تاكاغي','رين','سارا','شيزوكا','الماركيز','سيفيروس',
   'هاروهي سوزوميا (ميلانخولية هاروهي)','كيون','يوكي ناغاتو','ميكورو آشيهارا','تسورويا','إيتسوكي كويزومي','سامي','كيميدوري','فويوكي','الراوي',
-
-  // --- مانهوا (كورية) ---
   'جين تاي تشون (ذا غود أوف هاي سكول)','هان داي واي','ميرا يو','بارك إيل بيوم','قمر الدم','أمون','شيفا','سوبرمان','جوكر','كرو',
   'لويد (الابن الأكثر تواضعاً)','خافيير','سوشي','بيتر','الأب الأكبر','آيكاروس','تيريس','لورا','بينا','فلورا',
   'سونغ جين وو (سولو ليفيلينغ)','تشا هاي إن','يو جين هو','أفضل لاعب','جو هي','توماس أندريه','تشو جيون','الملكة','إيغريس','بيرو',
   'كيم غونغ جا (الباحث عن المتعة)','بارك يونغ','جانغ','شيمو','بطل كرة السلة','السيد لي','مستر كيم','كيم سو يونغ','بارك مون جاي','هان سو',
   'يانغ (ذا بريث أوف ذا وايلد)','لي تشانغ','يون هوا','نامو','شويكي','غو ريونغ','باك','سيونغ','مدرب القتال','فنان الفنون القتالية',
-
-  // --- عابرة وشخصيات أسطورية ---
   'أستا (بلاك كلوفر)','يوكو (ذا غريمنوري)','نويلي سيلفا','فوغوليون فانسانس','فونس كرولوس','ماكا ألبارن','سول إيفانغز','بلاك ستار','كيد دي أثر','ليز طومسون',
   'ديمون (ديمون سلاير)','ميوزاكي شينكاي (أنمي أفلام)','تاكي (اسمك)','ميتسوها','هوداكا (وتد المطر)','هينا','سوتا (أطفال الطقس)','هينا','موري (طيف)','ريو',
   'نوبيتا (دورايمون)','دورايمون','شيزوكا','جاين','سانيو','ديكيسوغي','المعلم','السيدة كيتا','ريو','بيكو'
@@ -372,17 +401,15 @@ function shuffle(arr) {
   return a;
 }
 
-/** إرسال DM عبر InteractionWebhook */
-async function sendDM(client, player, content) {
+/**
+ * إرسال DM مباشر إلى اللاعب (بدون الاعتماد على توكن التفاعل المنتهي الصلاحية)
+ */
+async function sendDM(client, playerId, content) {
   try {
-    const wh = new InteractionWebhook(
-      client,
-      player.msgInfo.applicationId,
-      player.msgInfo.interactionToken,
-    );
-    await wh.send({ content, ephemeral: true });
+    const user = await client.users.fetch(playerId);
+    await user.send(content);
   } catch (e) {
-    console.error(`[Spy] فشل إرسال DM لـ ${player.id}:`, e);
+    console.error(`[Spy] فشل إرسال DM لـ ${playerId}:`, e);
   }
 }
 
@@ -390,7 +417,7 @@ async function sendDM(client, player, content) {
 //  إرسال سجلات الحكم (قناة اللوغات)
 // ════════════════════════════════════════════════════════════════════
 
-const JUDGE_CHANNEL_ID = '1351312429354713098'; // نفس قناة المحبس
+const JUDGE_CHANNEL_ID = '1351312429354713098';
 
 async function sendJudgeDM(client, content) {
   try {
@@ -406,7 +433,7 @@ async function sendJudgeDM(client, content) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  أدوات تحميل الصور (مستعارة من الروليت)
+//  أدوات تحميل الصور
 // ════════════════════════════════════════════════════════════════════
 
 async function downloadImage(url) {
@@ -441,6 +468,77 @@ async function loadGameImage(imagePathOrUrl, fallbackFileName = 'image.png') {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  نظام الإدخال عبر الأزرار والنوافذ المنبثقة (Modals)
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * طلب إدخال نصي من لاعب عبر زر ثم مودال
+ * @param {TextChannel} channel - القناة
+ * @param {string} playerId - آيدي اللاعب
+ * @param {number} timeout - المهلة بالميلي ثانية
+ * @param {'hint'|'question'|'answer'|'guess'} inputType - نوع الإدخال
+ * @returns {Promise<string|null>} النص المدخل أو null في حال انتهاء الوقت
+ */
+async function askForInput(channel, playerId, timeout, inputType) {
+  const labels = {
+    hint:     { btn: 'اكتب تلميحك',  modal: 'التلميح',     placeholder: 'اكتب جملة تلميحية دون ذكر الكلمة...' },
+    question: { btn: 'اكتب سؤالك',   modal: 'السؤال',      placeholder: 'اكتب سؤالك هنا...' },
+    answer:   { btn: 'اكتب إجابتك',  modal: 'الإجابة',     placeholder: 'اكتب إجابتك هنا...' },
+    guess:    { btn: 'خمّن الكلمة',  modal: 'تخمين الكلمة', placeholder: 'اكتب تخمينك للكلمة السرية...' },
+  };
+  const { btn, modal, placeholder } = labels[inputType];
+
+  const btnRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`modal_${inputType}_${playerId}`)
+      .setLabel(btn)
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  const promptMsg = await channel.send({
+    content: ` <@${playerId}> ${inputType === 'hint' || inputType === 'guess' ? '🎤' : '✏️'} اضغط الزر لتبدأ`,
+    components: [btnRow],
+  });
+
+  try {
+    const buttonI = await promptMsg.awaitMessageComponent({
+      filter: i => i.customId === `modal_${inputType}_${playerId}` && i.user.id === playerId,
+      time: timeout,
+    });
+
+    const modalBuilder = new ModalBuilder()
+      .setCustomId(`modal_submit_${inputType}_${playerId}`)
+      .setTitle(modal)
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('input')
+            .setLabel(modal)
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder(placeholder)
+            .setRequired(true)
+            .setMaxLength(400)
+        ),
+      );
+
+    await buttonI.showModal(modalBuilder);
+
+    const modalI = await buttonI.awaitModalSubmit({
+      time: timeout,
+      filter: i => i.customId === `modal_submit_${inputType}_${playerId}` && i.user.id === playerId,
+    });
+
+    await modalI.deferUpdate().catch(() => {});
+    const value = modalI.fields.getTextInputValue('input').trim();
+    try { await promptMsg.delete(); } catch (_) {}
+    return value;
+  } catch {
+    try { await promptMsg.delete(); } catch (_) {}
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  تصدير الأمر الرئيسي
 // ════════════════════════════════════════════════════════════════════
 
@@ -451,7 +549,7 @@ module.exports = {
   async execute(message, args, callback) {
     if (GAME_ACTIVE) {
       await message.reply({
-        content: '### ⛔ اللعبة تعمل بالفعل!\nانتظر انتهاء الجولة الحالية ثم حاول مرة أخرى.',
+        content: `### ${EMOJIS.stop} اللعبة تعمل بالفعل!\nانتظر انتهاء الجولة الحالية ثم حاول مرة أخرى.`,
       });
       callback();
       return;
@@ -463,7 +561,7 @@ module.exports = {
 };
 
 // ════════════════════════════════════════════════════════════════════
-//  مرحلة الاستقبال (Lobby) — تصميم روليت معدل
+//  مرحلة الاستقبال (Lobby)
 // ════════════════════════════════════════════════════════════════════
 
 async function runLobby(context, callback) {
@@ -474,60 +572,55 @@ async function runLobby(context, callback) {
   let currentMode = 'classic';
   const hostId = context.author?.id ?? context.user?.id;
 
-  // صورة اللوبي (إن وجدت)
   const lobbyImageFile = await loadGameImage(config.lobbyImages?.outsider, 'lobby.png');
 
-  // بناء محتوى البداية
   const buildContent = () =>
     `اللاعبين: **${players.length}/${MAX_PLAYERS}**\n**<t:${endTime}:R>**`;
 
-  // بناء الأزرار
   const buildComponents = () => {
     const rows = [];
 
-    // صف أزرار الدخول والخروج
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('join')
-        .setEmoji(Z1_EMOJI)
+        .setEmoji(EMOJIS.z1)
         .setLabel('دخول')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('exit')
-        .setEmoji(Z2_EMOJI)
+        .setEmoji(EMOJIS.z2)
         .setLabel('خروج')
         .setStyle(ButtonStyle.Secondary),
     );
     rows.push(actionRow);
 
-    // صف قائمة اختيار الوضع (أسفل أزرار الدخول والخروج)
     const modeSelect = new StringSelectMenuBuilder()
       .setCustomId('mode_select')
-      .setPlaceholder('🎮 اختر وضع اللعب')
+      .setPlaceholder(`${EMOJIS.modeSelect} اختر وضع اللعب`)
       .addOptions(
         new StringSelectMenuOptionBuilder()
           .setLabel('الكلاسيكي')
           .setDescription('كل لاعب يعطي تلميحاً، والجاسوس يخمن سراً')
           .setValue('classic')
-          .setEmoji('🎯')
+          .setEmoji(EMOJIS.classic)
           .setDefault(currentMode === 'classic'),
         new StringSelectMenuOptionBuilder()
           .setLabel('الأسئلة')
           .setDescription('اللاعبون يسألون بعضهم — اكتشف الجاسوس!')
           .setValue('questions')
-          .setEmoji('❓')
+          .setEmoji(EMOJIS.questions)
           .setDefault(currentMode === 'questions'),
         new StringSelectMenuOptionBuilder()
           .setLabel('المهمة')
           .setDescription('جاسوس يقاوم مجموعة — ومهمة خفية يجب إنجازها')
           .setValue('mission')
-          .setEmoji('💣')
+          .setEmoji(EMOJIS.mission)
           .setDefault(currentMode === 'mission'),
         new StringSelectMenuOptionBuilder()
           .setLabel('الجواسيس المتعددين')
           .setDescription('جاسوسان أو أكثر يتخفون — إقصاءات متعددة')
           .setValue('double')
-          .setEmoji('🕵️‍♂️')
+          .setEmoji(EMOJIS.double)
           .setDefault(currentMode === 'double'),
       );
     rows.push(new ActionRowBuilder().addComponents(modeSelect));
@@ -535,7 +628,6 @@ async function runLobby(context, callback) {
     return rows;
   };
 
-  // إرسال رسالة اللوبي الأولية
   const sendOptions = {
     content: buildContent(),
     components: buildComponents(),
@@ -545,14 +637,12 @@ async function runLobby(context, callback) {
 
   const lobbyMsg = await context.reply(sendOptions);
 
-  // تحديث كل 10 ثوانٍ للعداد وعدد اللاعبين
   const updateInterval = setInterval(async () => {
     try {
       await lobbyMsg.edit({ content: buildContent() }).catch(() => {});
     } catch (e) {}
   }, 10_000);
 
-  // جامع الأزرار
   const filter = (i) =>
     i.customId === 'join' ||
     i.customId === 'exit' ||
@@ -564,10 +654,9 @@ async function runLobby(context, callback) {
   });
 
   collector.on('collect', async (i) => {
-    // ── تغيير الوضع (المضيف فقط) ──
     if (i.customId === 'mode_select') {
       if (i.user.id !== hostId) {
-        await i.reply({ content: '⚠️ فقط من بدأ اللعبة يستطيع تغيير الوضع.', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.warning} فقط من بدأ اللعبة يستطيع تغيير الوضع.`, ephemeral: true });
         return;
       }
       currentMode = i.values[0];
@@ -579,25 +668,22 @@ async function runLobby(context, callback) {
       return;
     }
 
-    // ── انضمام ──
     if (i.customId === 'join') {
       if (players.some(p => p.id === i.user.id)) {
-        await i.reply({ content: '✅ أنت منضم بالفعل!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.correct} أنت منضم بالفعل!`, ephemeral: true });
         return;
       }
       if (players.length >= MAX_PLAYERS) {
-        await i.reply({ content: '⚠️ اللعبة ممتلئة!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.warning} اللعبة ممتلئة!`, ephemeral: true });
         return;
       }
       players.push({
         id: i.user.id,
         displayName: i.member?.displayName ?? i.user.displayName,
-        msgInfo: { applicationId: i.applicationId, interactionToken: i.token },
       });
     } else {
-      // ── خروج ──
       if (!players.some(p => p.id === i.user.id)) {
-        await i.reply({ content: '⚠️ لست في اللعبة أصلاً!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.warning} لست في اللعبة أصلاً!`, ephemeral: true });
         return;
       }
       players = players.filter(p => p.id !== i.user.id);
@@ -612,33 +698,29 @@ async function runLobby(context, callback) {
 
   collector.on('end', async () => {
     clearInterval(updateInterval);
-    // إخفاء الأزرار والقائمة
     try {
       await lobbyMsg.edit({ content: '', components: [] }).catch(() => {});
     } catch (_) {}
 
-    // إذا لم يكتمل العدد
     if (players.length < MIN_PLAYERS) {
-      await context.channel.send('🚶‍♂️ لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.');
+      await context.channel.send(`${EMOJIS.timeout} لم ينضم عدد كافٍ من اللاعبين. انتهى وقت الانضمام.`);
       resetGame();
       callback();
       return;
     }
 
-    // ══ اختيار قسم الكلمات (قبل بدء اللعبة) ══
     const category = await chooseCategory(context, hostId);
     if (!category) {
-      await context.channel.send('⏰ لم يتم اختيار قسم، سيتم اختيار كلمات من جميع الأقسام.');
+      await context.channel.send(`${EMOJIS.timeout} لم يتم اختيار قسم، سيتم اختيار كلمات من جميع الأقسام.`);
     }
-    await context.channel.send('<:z3:1511872921142825040> | تم الانتهاء من تسجيل اللاعبين، ستبدأ اللعبة بعد قليل...');
+    await context.channel.send(`${EMOJIS.z3} | تم الانتهاء من تسجيل اللاعبين، ستبدأ اللعبة بعد قليل...`);
     await sleep(4000);
 
     const opts = { context, players, callback, category };
     if      (currentMode === 'questions') await runQuestionsMode(opts);
     else if (currentMode === 'mission')   await runMissionMode(opts);
     else if (currentMode === 'double') {
-      // طلب اختيار أسلوب اللعب من المضيف
-      await context.channel.send('<:z3:1511872921142825040> | اختر أسلوب لعب الجواسيس المتعددين:');
+      await context.channel.send(`${EMOJIS.z3} | اختر أسلوب لعب الجواسيس المتعددين:`);
       const subMode = await askDoubleStyle(context, hostId);
       await runDoubleAgentMode(opts, subMode);
     }
@@ -647,12 +729,12 @@ async function runLobby(context, callback) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  قائمة اختيار القسم (صفحات) — تظهر بعد انتهاء اللوبي
+//  قائمة اختيار القسم (صفحات)
 // ════════════════════════════════════════════════════════════════════
 
 async function chooseCategory(context, hostId) {
   const categories = Object.keys(WORD_BANK);
-  const pageSize = 25; // الحد الأقصى لخيارات الـ Select Menu
+  const pageSize = 25;
   const pages = [];
   for (let i = 0; i < categories.length; i += pageSize) {
     pages.push(categories.slice(i, i + pageSize));
@@ -668,7 +750,7 @@ async function chooseCategory(context, hostId) {
       .addOptions(
         page.map(cat =>
           new StringSelectMenuOptionBuilder()
-            .setLabel(cat) // اسم القسم كاملاً مع الإيموجي
+            .setLabel(cat)
             .setValue(cat)
         )
       );
@@ -725,16 +807,15 @@ async function chooseCategory(context, hostId) {
 
     col.on('end', async (collected, reason) => {
       if (reason !== 'messageDelete' && !collected.some(i => i.customId === 'category_select')) {
-        // timeout أو لم يتم اختيار شيء
         try { await msg.delete(); } catch (_) {}
-        resolve(null); // null يعني استخدام جميع الأقسام
+        resolve(null);
       }
     });
   });
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  🎯  الوضع الكلاسيكي (بدون تخمين مبكر، مع فرصة أخيرة بعد التصويت)
+//  🎯  الوضع الكلاسيكي
 // ════════════════════════════════════════════════════════════════════
 
 async function runClassicMode({ context, players, callback, category }) {
@@ -743,21 +824,18 @@ async function runClassicMode({ context, players, callback, category }) {
   const word        = randomWord(category);
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
-  const insiders    = players.filter((_, i) => i !== outsiderIdx);
   const order       = shuffle(players);
 
-  // ══ إرسال سجل الحكم: بدء الوضع الكلاسيكي ══
-  await sendJudgeDM(context.client, `🎯 وضع كلاسيكي:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
+  await sendJudgeDM(context.client, `${EMOJIS.classic} وضع كلاسيكي:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
 
-  // إرسال الأدوار سراً
   await context.channel.send({
     components: [
       new ContainerBuilder()
         .setAccentColor(config.colors?.outsider ?? 0x6C3483)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🕵️‍♂️ بدأت لعبة الجاسوس!\n` +
-          `### الوضع الكلاسيكي 🎯\n\n` +
-          `📨 جاري توزيع الأدوار بشكل سري...\n\n` +
+          `## ${EMOJIS.spyIcon} بدأت لعبة الجاسوس!\n` +
+          `### الوضع الكلاسيكي ${EMOJIS.classic}\n\n` +
+          `${EMOJIS.sending} جاري توزيع الأدوار بشكل سري...\n\n` +
           `**اللاعبون:**\n${players.map(p => `> <@${p.id}>`).join('\n')}`,
         )),
     ],
@@ -766,22 +844,21 @@ async function runClassicMode({ context, players, callback, category }) {
 
   for (const player of players) {
     const isOutsider = player.id === outsider.id;
-    await sendDM(context.client, player,
+    await sendDM(context.client, player.id,
       isOutsider
-        ? `🕵️‍♂️ **أنت الجاسوس!**\n\nاستمع جيداً لتلميحات الآخرين وحاول تخمين الكلمة السرية.\nتجنب الكشف عن نفسك!`
-        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nلمّح للكلمة دون ذكرها مباشرة — ساعد المجموعة في كشف الجاسوس!`,
+        ? `${EMOJIS.spyIcon} **أنت الجاسوس!**\n\nاستمع جيداً لتلميحات الآخرين وحاول تخمين الكلمة السرية.\nتجنب الكشف عن نفسك!`
+        : `${EMOJIS.correct} **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nلمّح للكلمة دون ذكرها مباشرة — ساعد المجموعة في كشف الجاسوس!`,
     );
   }
 
   await sleep(4000);
 
-  // مرحلة التلميحات
   await context.channel.send({
     components: [
       new ContainerBuilder()
         .setAccentColor(0x2ECC71)
         .addTextDisplayComponents(t => t.setContent(
-          `## 💬 مرحلة التلميحات\n` +
+          `## ${EMOJIS.speech} مرحلة التلميحات\n` +
           `كل لاعب لديه **${HINT_TIME / 1000} ثانية** ليكتب جملة تلميحية.\n` +
           `**لا تذكر الكلمة السرية مباشرة!**\n\n` +
           `ترتيب اللاعبين:\n${order.map((p, i) => `> **${i + 1}.** <@${p.id}>`).join('\n')}`,
@@ -794,20 +871,7 @@ async function runClassicMode({ context, players, callback, category }) {
 
   const hints = [];
   for (const player of order) {
-    await context.channel.send({
-      components: [
-        new ContainerBuilder()
-          .setAccentColor(0xF39C12)
-          .addTextDisplayComponents(t => t.setContent(
-            `### 🎤 <@${player.id}> — دورك!\n` +
-            `اكتب جملة تلميحية للكلمة السرية.\n` +
-            `-# ⏰ لديك ${HINT_TIME / 1000} ثانية`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-    const hint = await collectMessage(context.channel, player.id, HINT_TIME);
+    const hint = await askForInput(context.channel, player.id, HINT_TIME, 'hint');
     hints.push({ player, hint });
 
     if (hint === null) {
@@ -815,7 +879,7 @@ async function runClassicMode({ context, players, callback, category }) {
         components: [
           new ContainerBuilder()
             .setAccentColor(0xE74C3C)
-            .addTextDisplayComponents(t => t.setContent(`⏰ <@${player.id}> لم يكتب تلميحاً — تجاوز.`)),
+            .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${player.id}> لم يكتب تلميحاً — تجاوز.`)),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
@@ -828,7 +892,7 @@ async function runClassicMode({ context, players, callback, category }) {
       new ContainerBuilder()
         .setAccentColor(0x3498DB)
         .addTextDisplayComponents(t => t.setContent(
-          `## 📋 ملخص التلميحات\n\n` +
+          `## ${EMOJIS.summary} ملخص التلميحات\n\n` +
           (validHints.length
             ? validHints.map((h, i) =>
                 `> **${i + 1}.** ${h.player.displayName}\n> *"${h.hint}"*`
@@ -841,18 +905,16 @@ async function runClassicMode({ context, players, callback, category }) {
     flags: MessageFlags.IsComponentsV2,
   });
 
-  // ══ إرسال سجل الحكم: التلميحات ══
   const hintsLog = hints.map(h => `${h.player.displayName}: ${h.hint ?? 'لم يكتب'}`).join('\n');
-  await sendJudgeDM(context.client, `📋 تلميحات الكلاسيكي:\n${hintsLog}`);
+  await sendJudgeDM(context.client, `${EMOJIS.summary} تلميحات الكلاسيكي:\n${hintsLog}`);
 
   await sleep(2000);
 
-  // الانتقال مباشرة للتصويت (بدون تخمين علني مبكر)
   await runVotePhase({ context, players, outsider, word, VOTE_TIME, mode: 'classic', callback });
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  ❓  وضع الأسئلة (مع إمكانية طلب التصويت بالنص دون قطع الجولة)
+//  ❓  وضع الأسئلة
 // ════════════════════════════════════════════════════════════════════
 
 async function runQuestionsMode({ context, players, callback, category }) {
@@ -861,19 +923,16 @@ async function runQuestionsMode({ context, players, callback, category }) {
   const word        = randomWord(category);
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
-  const insiders    = players.filter((_, i) => i !== outsiderIdx);
 
-  // ══ سجل الحكم: بدء وضع الأسئلة ══
-  await sendJudgeDM(context.client, `❓ وضع الأسئلة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
+  await sendJudgeDM(context.client, `${EMOJIS.questions} وضع الأسئلة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
 
-  // توزيع الأدوار
   await context.channel.send({
     components: [
       new ContainerBuilder()
         .setAccentColor(config.colors?.outsider ?? 0x6C3483)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🕵️‍♂️ لعبة الجاسوس — وضع الأسئلة ❓\n\n` +
-          `📨 جاري توزيع الأدوار سراً...\n\n` +
+          `## ${EMOJIS.spyIcon} لعبة الجاسوس — وضع الأسئلة ${EMOJIS.questions}\n\n` +
+          `${EMOJIS.sending} جاري توزيع الأدوار سراً...\n\n` +
           `**اللاعبون:**\n${players.map(p => `> <@${p.id}>`).join('\n')}`,
         )),
     ],
@@ -882,10 +941,10 @@ async function runQuestionsMode({ context, players, callback, category }) {
 
   for (const player of players) {
     const isOutsider = player.id === outsider.id;
-    await sendDM(context.client, player,
+    await sendDM(context.client, player.id,
       isOutsider
-        ? `🕵️‍♂️ **أنت الجاسوس!**\n\nاللاعبون سيسألون بعضهم البعض.\nأجب بذكاء لتتجنب الكشف!\nبعد ${MIN_ROUNDS} جولات يمكن طلب التصويت بكتابة \"تصويت\" أو عبر الأزرار.`
-        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nاسأل أسئلة ذكية وراقب الإجابات — الجاسوس لا يعرف الكلمة!\nبعد ${MIN_ROUNDS} جولات يمكنك طلب التصويت بكتابة \"تصويت\".`,
+        ? `${EMOJIS.spyIcon} **أنت الجاسوس!**\n\nاللاعبون سيسألون بعضهم البعض.\nأجب بذكاء لتتجنب الكشف!\nبعد ${MIN_ROUNDS} جولات يمكن طلب التصويت بكتابة \"تصويت\" أو عبر الأزرار.`
+        : `${EMOJIS.correct} **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nاسأل أسئلة ذكية وراقب الإجابات — الجاسوس لا يعرف الكلمة!\nبعد ${MIN_ROUNDS} جولات يمكنك طلب التصويت بكتابة \"تصويت\".`,
     );
   }
 
@@ -896,7 +955,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
       new ContainerBuilder()
         .setAccentColor(0x1ABC9C)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🔍 مرحلة التحقيق — الأسئلة المتبادلة\n\n` +
+          `## ${EMOJIS.investigate} مرحلة التحقيق — الأسئلة المتبادلة\n\n` +
           `**القواعد:**\n` +
           `> • البوت يختار أول سائل عشوائياً\n` +
           `> • بعد كل إجابة، المُجيب يختار من يسأل في الجولة التالية\n` +
@@ -911,7 +970,6 @@ async function runQuestionsMode({ context, players, callback, category }) {
 
   await sleep(2000);
 
-  // جامع رسائل لرصد طلب التصويت بالنص - لا يقطع الجولة، فقط يسجل الطلب
   let voteRequestedByText = false;
   const textVoteCollector = context.channel.createMessageCollector({
     filter: m => !m.author.bot && players.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
@@ -926,7 +984,6 @@ async function runQuestionsMode({ context, players, callback, category }) {
   let currentAsker = players[Math.floor(Math.random() * players.length)];
 
   while (!voteRequested) {
-    // التحقق من طلب التصويت قبل بدء الجولة (إذا كان قد طُلب في الجولة السابقة)
     if (voteRequestedByText) {
       voteRequested = true;
       break;
@@ -935,27 +992,14 @@ async function runQuestionsMode({ context, players, callback, category }) {
     const others = players.filter(p => p.id !== currentAsker.id);
     const target  = others[Math.floor(Math.random() * others.length)];
 
-    await context.channel.send({
-      components: [
-        new ContainerBuilder()
-          .setAccentColor(0xF39C12)
-          .addTextDisplayComponents(t => t.setContent(
-            `### ❓ الجولة ${rounds + 1}\n` +
-            `<@${currentAsker.id}> — اسأل <@${target.id}> سؤالاً!\n` +
-            `-# ⏰ ${ANSWER_TIME / 1000} ثانية للسؤال ثم الإجابة`,
-          )),
-      ],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-    const question = await collectMessage(context.channel, currentAsker.id, ANSWER_TIME);
+    const question = await askForInput(context.channel, currentAsker.id, ANSWER_TIME, 'question');
 
     if (!question) {
       await context.channel.send({
         components: [
           new ContainerBuilder()
             .setAccentColor(0x7F8C8D)
-            .addTextDisplayComponents(t => t.setContent(`⏰ <@${currentAsker.id}> لم يسأل — تخطي.`)),
+            .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${currentAsker.id}> لم يسأل — تخطي.`)),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
@@ -967,15 +1011,15 @@ async function runQuestionsMode({ context, players, callback, category }) {
           new ContainerBuilder()
             .setAccentColor(0x3498DB)
             .addTextDisplayComponents(t => t.setContent(
-              `### 💬 <@${target.id}> — أجب!\n` +
+              `### ${EMOJIS.speech} <@${target.id}> — أجب!\n` +
               `السؤال: *"${question}"*\n` +
-              `-# ⏰ ${ANSWER_TIME / 1000} ثانية`,
+              `-# ${EMOJIS.timeout} ${ANSWER_TIME / 1000} ثانية`,
             )),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
 
-      const answer = await collectMessage(context.channel, target.id, ANSWER_TIME);
+      const answer = await askForInput(context.channel, target.id, ANSWER_TIME, 'answer');
       rounds++;
 
       if (!answer) {
@@ -983,7 +1027,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
           components: [
             new ContainerBuilder()
               .setAccentColor(0x7F8C8D)
-              .addTextDisplayComponents(t => t.setContent(`⏰ <@${target.id}> لم يُجب.`)),
+              .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${target.id}> لم يُجب.`)),
           ],
           flags: MessageFlags.IsComponentsV2,
         });
@@ -1001,7 +1045,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
           );
         });
         const controlRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('request_vote').setLabel('🗳️ طلب تصويت').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('request_vote').setLabel(`${EMOJIS.voteRequest} طلب تصويت`).setStyle(ButtonStyle.Danger),
         );
 
         const chooseMsg = await context.channel.send({
@@ -1009,7 +1053,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
             new ContainerBuilder()
               .setAccentColor(0x9B59B6)
               .addTextDisplayComponents(t => t.setContent(
-                `### 🎯 <@${target.id}> — اختر التالي!\n` +
+                `### ${EMOJIS.classic} <@${target.id}> — اختر التالي!\n` +
                 `من تريد توجيه السؤال له؟\n` +
                 `-# يمكنك طلب تصويت (مرت ${rounds} جولات)`,
               ))
@@ -1047,7 +1091,7 @@ async function runQuestionsMode({ context, players, callback, category }) {
             new ContainerBuilder()
               .setAccentColor(0x2C3E50)
               .addTextDisplayComponents(t => t.setContent(
-                `-# 🤖 البوت اختار: <@${currentAsker.id}> سيسأل التالي`,
+                `-# ${EMOJIS.bot} البوت اختار: <@${currentAsker.id}> سيسأل التالي`,
               )),
           ],
           flags: MessageFlags.IsComponentsV2,
@@ -1093,20 +1137,18 @@ async function runMissionMode({ context, players, callback, category }) {
   const word        = randomWord(category);
   const outsiderIdx = Math.floor(Math.random() * players.length);
   const outsider    = players[outsiderIdx];
-  const insiders    = players.filter((_, i) => i !== outsiderIdx);
   const mission     = MISSIONS[Math.floor(Math.random() * MISSIONS.length)];
   const missionKeys = MISSION_KEYWORDS[mission] ?? [];
 
-  // ══ سجل الحكم: بدء وضع المهمة ══
-  await sendJudgeDM(context.client, `💣 وضع المهمة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- المهمة: ${mission}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
+  await sendJudgeDM(context.client, `${EMOJIS.mission} وضع المهمة:\n- الجاسوس: ${outsider.displayName} (${outsider.id})\n- الكلمة: ${word}\n- المهمة: ${mission}\n- اللاعبون: ${players.map(p => p.displayName).join(', ')}`);
 
   await context.channel.send({
     components: [
       new ContainerBuilder()
         .setAccentColor(config.colors?.outsider ?? 0x6C3483)
         .addTextDisplayComponents(t => t.setContent(
-          `## 💣 لعبة الجاسوس — وضع المهمة\n\n` +
-          `📨 جاري توزيع الأدوار...\n\n` +
+          `## ${EMOJIS.mission} لعبة الجاسوس — وضع المهمة\n\n` +
+          `${EMOJIS.sending} جاري توزيع الأدوار...\n\n` +
           `**اللاعبون:**\n${players.map(p => `> <@${p.id}>`).join('\n')}`,
         )),
     ],
@@ -1115,10 +1157,10 @@ async function runMissionMode({ context, players, callback, category }) {
 
   for (const player of players) {
     const isOutsider = player.id === outsider.id;
-    await sendDM(context.client, player,
+    await sendDM(context.client, player.id,
       isOutsider
-        ? `🕵️‍♂️ **أنت الجاسوس!**\n\n**مهمتك السرية:**\n> ${mission}\n\nأكمل مهمتك أثناء النقاش دون كشف نفسك!\nإذا نجحت قبل انتهاء الوقت أو التصويت — تفوز!\n\n**ملاحظة:** المجموعة تعرف الكلمة السرية وأنت لا تعرفها، فتحدث بحذر.`
-        : `✅ **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nناقشوا الكلمة وحاولوا كشف الجاسوس قبل أن ينجز مهمته السرية!\n\n**تنبيه:** الجاسوس قد يدفع أحدكم لقول كلمات معينة، انتبهوا!`,
+        ? `${EMOJIS.spyIcon} **أنت الجاسوس!**\n\n**مهمتك السرية:**\n> ${mission}\n\nأكمل مهمتك أثناء النقاش دون كشف نفسك!\nإذا نجحت قبل انتهاء الوقت أو التصويت — تفوز!\n\n**ملاحظة:** المجموعة تعرف الكلمة السرية وأنت لا تعرفها، فتحدث بحذر.`
+        : `${EMOJIS.correct} **أنت من المجموعة!**\n\nالكلمة السرية: **${word}**\n\nناقشوا الكلمة وحاولوا كشف الجاسوس قبل أن ينجز مهمته السرية!\n\n**تنبيه:** الجاسوس قد يدفع أحدكم لقول كلمات معينة، انتبهوا!`,
     );
   }
 
@@ -1129,7 +1171,7 @@ async function runMissionMode({ context, players, callback, category }) {
       new ContainerBuilder()
         .setAccentColor(0xE74C3C)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🔥 مرحلة النقاش الحر\n\n` +
+          `## ${EMOJIS.fire} مرحلة النقاش الحر\n\n` +
           `**قواعد وضع المهمة:**\n` +
           `> • الجاسوس لديه **مهمة سرية** (تظهر له في الخاص) يجب أن ينجزها خلال النقاش\n` +
           `> • المهمة غالباً أن يجعل أحد اللاعبين يقول كلمة محددة أو يتصرف بشكل معين\n` +
@@ -1172,15 +1214,14 @@ async function runMissionMode({ context, players, callback, category }) {
   if (!discussCol.ended) discussCol.stop();
 
   if (missionComplete && missionKeys.length > 0) {
-    // ══ سجل الحكم: إنجاز المهمة ══
-    await sendJudgeDM(context.client, `💣 مهمة الجاسوس أنجزت بواسطة ذكر الكلمة من <@${missionCompleter}>`);
+    await sendJudgeDM(context.client, `${EMOJIS.mission} مهمة الجاسوس أنجزت بواسطة ذكر الكلمة من <@${missionCompleter}>`);
 
     await context.channel.send({
       components: [
         new ContainerBuilder()
           .setAccentColor(0xE74C3C)
           .addTextDisplayComponents(t => t.setContent(
-            `## ⚡ أُنجزت المهمة!\n` +
+            `## ${EMOJIS.bolt} أُنجزت المهمة!\n` +
             `<@${missionCompleter}> ذكر الكلمة المطلوبة في رسالته!\n\n` +
             `🏆 **الجاسوس <@${outsider.id}> أنجز مهمته ويفوز!**`,
           )),
@@ -1199,7 +1240,7 @@ async function runMissionMode({ context, players, callback, category }) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  🕵️‍♂️  وضع الجواسيس المتعددين (الإقصاءات المتعددة)
+//  🕵️‍♂️  وضع الجواسيس المتعددين
 // ════════════════════════════════════════════════════════════════════
 
 async function askDoubleStyle(context, hostId) {
@@ -1211,12 +1252,12 @@ async function askDoubleStyle(context, hostId) {
         .setLabel('الكلاسيكي')
         .setDescription('تلميحات ثم تصويت')
         .setValue('classic')
-        .setEmoji('🎯'),
+        .setEmoji(EMOJIS.classic),
       new StringSelectMenuOptionBuilder()
         .setLabel('الأسئلة')
         .setDescription('أسئلة متبادلة ثم تصويت')
         .setValue('questions')
-        .setEmoji('❓'),
+        .setEmoji(EMOJIS.questions),
     );
 
   const row = new ActionRowBuilder().addComponents(menu);
@@ -1236,7 +1277,7 @@ async function askDoubleStyle(context, hostId) {
     return choice.values[0];
   } catch {
     await msg.delete().catch(() => {});
-    return 'classic'; // افتراضي
+    return 'classic';
   }
 }
 
@@ -1246,9 +1287,8 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
   if (totalPlayers <= 3) spyCount = 1;
   else if (totalPlayers <= 5) spyCount = 1;
   else if (totalPlayers <= 7) spyCount = 2;
-  else spyCount = 3; // 8-10
+  else spyCount = 3;
 
-  // التأكد من وجود لاعبين مجموعة
   if (spyCount >= totalPlayers) spyCount = Math.max(1, totalPlayers - 1);
 
   const shuffledAll = shuffle(players);
@@ -1260,31 +1300,48 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
   let round = 0;
   let gameEnded = false;
   let doHintRound = true;
+  let lastWord = null;
 
   const HINT_TIME = 35_000;
   const VOTE_TIME = 25_000;
   const ANSWER_TIME = 50_000;
   const MIN_ROUNDS = 4;
 
-  // ══ سجل الحكم: بدء وضع الجواسيس المتعددين ══
-  await sendJudgeDM(context.client, `🕵️‍♂️ وضع الجواسيس المتعددين (${style}):\n- عدد الجواسيس: ${spyCount}\n- الجواسيس: ${allSpies.map(s => s.displayName).join(', ')}\n- المجموعة: ${allInnocents.map(p => p.displayName).join(', ')}`);
+  await sendJudgeDM(context.client, `${EMOJIS.double} وضع الجواسيس المتعددين (${style}):\n- عدد الجواسيس: ${spyCount}\n- الجواسيس: ${allSpies.map(s => s.displayName).join(', ')}\n- المجموعة: ${allInnocents.map(p => p.displayName).join(', ')}`);
+
+  // رسالة البداية (مشابهة للأوضاع الأخرى)
+  await context.channel.send({
+    components: [
+      new ContainerBuilder()
+        .setAccentColor(config.colors?.outsider ?? 0x6C3483)
+        .addTextDisplayComponents(t => t.setContent(
+          `## ${EMOJIS.double} بدأت لعبة الجاسوس المتعددين!\n` +
+          `عدد الجواسيس: **${spyCount}**\n` +
+          `الأسلوب: **${style === 'classic' ? 'كلاسيكي' : 'أسئلة'}**\n\n` +
+          `${EMOJIS.sending} توزيع الأدوار سيكون سرياً مع بداية كل جولة.\n` +
+          `**اللاعبون:**\n${players.map(p => `> <@${p.id}>`).join('\n')}`,
+        )),
+    ],
+    flags: MessageFlags.IsComponentsV2,
+  });
+  await sleep(3000);
 
   while (!gameEnded) {
     if (doHintRound) {
       round++;
       const word = randomWord(category);
+      lastWord = word;
 
       // إرسال الأدوار سراً للمتبقين
       for (const player of remainingPlayers) {
         const isSpy = remainingSpies.some(s => s.id === player.id);
-        await sendDM(context.client, player,
+        await sendDM(context.client, player.id,
           isSpy
-            ? `🕵️‍♂️ **أنت جاسوس!**\nعدد الجواسيس الإجمالي: ${spyCount}\nحاول التخفي وتضليل المجموعة.\nلا تعرف الكلمة السرية!`
-            : `✅ **أنت من المجموعة!**\nالكلمة السرية: **${word}**\nلمّح لها دون ذكرها مباشرة.`
+            ? `${EMOJIS.spyIcon} **أنت جاسوس!**\nعدد الجواسيس الإجمالي: ${spyCount}\nحاول التخفي وتضليل المجموعة.\nلا تعرف الكلمة السرية!`
+            : `${EMOJIS.correct} **أنت من المجموعة!**\nالكلمة السرية: **${word}**\nلمّح لها دون ذكرها مباشرة.`
         );
       }
 
-      // ══ سجل الحكم: بدء الجولة ══
       await sendJudgeDM(context.client, `🔄 الجولة ${round}:\n- الكلمة: ${word}\n- المتبقون: ${remainingPlayers.map(p => p.displayName).join(', ')}`);
 
       await context.channel.send({
@@ -1293,8 +1350,8 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
             .setAccentColor(0x2ECC71)
             .addTextDisplayComponents(t => t.setContent(
               `## 🔄 الجولة ${round}\n` +
-              `### ${style === 'classic' ? '🎯 مرحلة التلميحات' : '❓ مرحلة الأسئلة'}\n\n` +
-              `الكلمة السرية **تغيرت**!\n\n` +
+              `### ${style === 'classic' ? `${EMOJIS.classic} مرحلة التلميحات` : `${EMOJIS.questions} مرحلة الأسئلة`}\n\n` +
+              (round > 1 ? `الكلمة السرية **تغيرت**!\n\n` : '') +
               `اللاعبون المتبقون: ${remainingPlayers.map(p => `<@${p.id}>`).join(', ')}`
             )),
         ],
@@ -1303,26 +1360,16 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
       await sleep(2000);
 
       if (style === 'classic') {
-        // تلميحات
         const order = shuffle(remainingPlayers);
         const hints = [];
         for (const player of order) {
-          await context.channel.send({
-            components: [new ContainerBuilder()
-              .setAccentColor(0xF39C12)
-              .addTextDisplayComponents(t => t.setContent(
-                `### 🎤 <@${player.id}> — دورك!\nاكتب جملة تلميحية.\n-# ⏰ ${HINT_TIME / 1000} ثانية`
-              ))
-            ],
-            flags: MessageFlags.IsComponentsV2,
-          });
-          const hint = await collectMessage(context.channel, player.id, HINT_TIME);
+          const hint = await askForInput(context.channel, player.id, HINT_TIME, 'hint');
           hints.push({ player, hint });
           if (hint === null) {
             await context.channel.send({
               components: [new ContainerBuilder()
                 .setAccentColor(0xE74C3C)
-                .addTextDisplayComponents(t => t.setContent(`⏰ <@${player.id}> لم يكتب تلميحاً — تجاوز.`))
+                .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${player.id}> لم يكتب تلميحاً — تجاوز.`))
               ],
               flags: MessageFlags.IsComponentsV2,
             });
@@ -1333,25 +1380,22 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
           components: [new ContainerBuilder()
             .setAccentColor(0x3498DB)
             .addTextDisplayComponents(t => t.setContent(
-              `## 📋 ملخص التلميحات\n\n` +
+              `## ${EMOJIS.summary} ملخص التلميحات\n\n` +
               (validHints.length ? validHints.map((h, i) => `> **${i + 1}.** ${h.player.displayName}\n> *"${h.hint}"*`).join('\n\n') : '> *لا توجد تلميحات!*')
             ))
           ],
           flags: MessageFlags.IsComponentsV2,
         });
 
-        // ══ سجل الحكم: التلميحات ══
         const hintsLog = hints.map(h => `${h.player.displayName}: ${h.hint ?? 'لم يكتب'}`).join('\n');
-        await sendJudgeDM(context.client, `📋 تلميحات الجولة ${round}:\n${hintsLog}`);
+        await sendJudgeDM(context.client, `${EMOJIS.summary} تلميحات الجولة ${round}:\n${hintsLog}`);
 
         await sleep(2000);
       } else {
-        // أسلوب الأسئلة - مطابق لوضع الأسئلة العادي
         let qRounds = 0;
         let voteRequested = false;
         let currentAsker = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
 
-        // جامع طلب التصويت بالنص - لا يقطع الجولة
         let voteRequestedByText = false;
         const textVoteCollector = context.channel.createMessageCollector({
           filter: m => !m.author.bot && remainingPlayers.some(p => p.id === m.author.id) && m.content.trim() === 'تصويت',
@@ -1362,7 +1406,6 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
         });
 
         while (!voteRequested && qRounds < MIN_ROUNDS + 10) {
-          // التحقق من طلب التصويت قبل بدء الجولة
           if (voteRequestedByText) {
             voteRequested = true;
             break;
@@ -1371,21 +1414,12 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
           const others = remainingPlayers.filter(p => p.id !== currentAsker.id);
           const target = others[Math.floor(Math.random() * others.length)];
 
-          await context.channel.send({
-            components: [new ContainerBuilder()
-              .setAccentColor(0xF39C12)
-              .addTextDisplayComponents(t => t.setContent(
-                `### ❓ الجولة ${qRounds + 1}\n<@${currentAsker.id}> — اسأل <@${target.id}> سؤالاً!\n-# ⏰ ${ANSWER_TIME / 1000} ثانية`
-              ))
-            ],
-            flags: MessageFlags.IsComponentsV2,
-          });
-          const question = await collectMessage(context.channel, currentAsker.id, ANSWER_TIME);
+          const question = await askForInput(context.channel, currentAsker.id, ANSWER_TIME, 'question');
           if (!question) {
             await context.channel.send({
               components: [new ContainerBuilder()
                 .setAccentColor(0x7F8C8D)
-                .addTextDisplayComponents(t => t.setContent(`⏰ <@${currentAsker.id}> لم يسأل — تخطي.`))
+                .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${currentAsker.id}> لم يسأل — تخطي.`))
               ],
               flags: MessageFlags.IsComponentsV2,
             });
@@ -1396,17 +1430,17 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
           await context.channel.send({
             components: [new ContainerBuilder()
               .setAccentColor(0x3498DB)
-              .addTextDisplayComponents(t => t.setContent(`### 💬 <@${target.id}> — أجب!\nالسؤال: *"${question}"*\n-# ⏰ ${ANSWER_TIME / 1000} ثانية`))
+              .addTextDisplayComponents(t => t.setContent(`### ${EMOJIS.speech} <@${target.id}> — أجب!\nالسؤال: *"${question}"*\n-# ${EMOJIS.timeout} ${ANSWER_TIME / 1000} ثانية`))
             ],
             flags: MessageFlags.IsComponentsV2,
           });
-          const answer = await collectMessage(context.channel, target.id, ANSWER_TIME);
+          const answer = await askForInput(context.channel, target.id, ANSWER_TIME, 'answer');
           qRounds++;
           if (!answer) {
             await context.channel.send({
               components: [new ContainerBuilder()
                 .setAccentColor(0x7F8C8D)
-                .addTextDisplayComponents(t => t.setContent(`⏰ <@${target.id}> لم يُجب.`))
+                .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} <@${target.id}> لم يُجب.`))
               ],
               flags: MessageFlags.IsComponentsV2,
             });
@@ -1424,7 +1458,7 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
               );
             });
             const controlRow = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('request_vote').setLabel('🗳️ طلب تصويت').setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId('request_vote').setLabel(`${EMOJIS.voteRequest} طلب تصويت`).setStyle(ButtonStyle.Danger),
             );
 
             const chooseMsg = await context.channel.send({
@@ -1432,7 +1466,7 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
                 new ContainerBuilder()
                   .setAccentColor(0x9B59B6)
                   .addTextDisplayComponents(t => t.setContent(
-                    `### 🎯 <@${target.id}> — اختر التالي!\n` +
+                    `### ${EMOJIS.classic} <@${target.id}> — اختر التالي!\n` +
                     `من تريد توجيه السؤال له؟\n` +
                     `-# يمكنك طلب تصويت (مرت ${qRounds} جولات)`,
                   ))
@@ -1470,7 +1504,7 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
                 new ContainerBuilder()
                   .setAccentColor(0x2C3E50)
                   .addTextDisplayComponents(t => t.setContent(
-                    `-# 🤖 البوت اختار: <@${currentAsker.id}> سيسأل التالي`,
+                    `-# ${EMOJIS.bot} البوت اختار: <@${currentAsker.id}> سيسأل التالي`,
                   )),
               ],
               flags: MessageFlags.IsComponentsV2,
@@ -1485,7 +1519,6 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
       doHintRound = false;
     }
 
-    // مرحلة التصويت (إقصاء واحد)
     const voteResult = await runDoubleVotePhase(context, remainingPlayers, VOTE_TIME);
     if (!voteResult) {
       gameEnded = true;
@@ -1496,8 +1529,7 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
     const eliminatedPlayer = remainingPlayers.find(p => p.id === eliminatedId);
     const wasSpy = remainingSpies.some(s => s.id === eliminatedId);
 
-    // ══ سجل الحكم: نتيجة التصويت ══
-    await sendJudgeDM(context.client, `🗳️ تصويت الجولة ${round}: أُقصي <@${eliminatedPlayer.id}> (${wasSpy ? 'جاسوس' : 'من المجموعة'})`);
+    await sendJudgeDM(context.client, `${EMOJIS.voteRequest} تصويت الجولة ${round}: أُقصي <@${eliminatedPlayer.id}> (${wasSpy ? 'جاسوس' : 'من المجموعة'})`);
 
     remainingPlayers = remainingPlayers.filter(p => p.id !== eliminatedId);
     if (wasSpy) {
@@ -1508,9 +1540,9 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
       components: [new ContainerBuilder()
         .setAccentColor(wasSpy ? 0xE74C3C : 0x2ECC71)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🗳️ نتيجة التصويت\n` +
+          `## ${EMOJIS.voteRequest} نتيجة التصويت\n` +
           `<@${eliminatedPlayer.id}> تم إقصاؤه.\n` +
-          (wasSpy ? `🔴 كان **جاسوساً**!` : `🟢 كان **من المجموعة**!`)
+          (wasSpy ? `${EMOJIS.redCircle} كان **جاسوساً**!` : `${EMOJIS.greenCircle} كان **من المجموعة**!`)
         ))
       ],
       flags: MessageFlags.IsComponentsV2,
@@ -1518,12 +1550,12 @@ async function runDoubleAgentMode({ context, players, callback, category }, styl
 
     const remainingInnocentsCount = remainingPlayers.length - remainingSpies.length;
     if (remainingSpies.length === 0) {
-      await endDoubleGame(context, 'group', allSpies, allInnocents, players, callback);
+      await endDoubleGame(context, 'group', allSpies, allInnocents, players, round, lastWord, callback);
       gameEnded = true;
       break;
     }
     if (remainingSpies.length >= remainingInnocentsCount) {
-      await endDoubleGame(context, 'spies', allSpies, allInnocents, players, callback);
+      await endDoubleGame(context, 'spies', allSpies, allInnocents, players, round, lastWord, callback);
       gameEnded = true;
       break;
     }
@@ -1561,7 +1593,7 @@ async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
     }
     const c = new ContainerBuilder()
       .setAccentColor(0x8E44AD)
-      .addTextDisplayComponents(t => t.setContent(`🗳️ صوّت على من تشك أنه جاسوس:`));
+      .addTextDisplayComponents(t => t.setContent(`${EMOJIS.voteRequest} صوّت على من تشك أنه جاسوس:`));
     rows.forEach(row => c.addActionRowComponents(r => { row.components.forEach(b => r.addComponents(b)); return r; }));
     return c;
   };
@@ -1578,12 +1610,12 @@ async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
     });
     col.on('collect', async i => {
       if (voters.has(i.user.id)) {
-        await i.reply({ content: '⚠️ صوّتت بالفعل!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.warning} صوّتت بالفعل!`, ephemeral: true });
         return;
       }
       const target = i.customId.replace('dvote_', '');
       if (target === i.user.id) {
-        await i.reply({ content: '❌ لا يمكنك التصويت على نفسك!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.cross} لا يمكنك التصويت على نفسك!`, ephemeral: true });
         return;
       }
       voters.add(i.user.id);
@@ -1591,7 +1623,7 @@ async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
       try {
         await i.update({ components: [buildVoteContainer()], flags: MessageFlags.IsComponentsV2 });
       } catch (_) {
-        await i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.correct} تم تسجيل صوتك.`, ephemeral: true });
       }
     });
     col.on('end', resolve);
@@ -1600,7 +1632,7 @@ async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
   try {
     const disabledContainer = new ContainerBuilder()
       .setAccentColor(0x7F8C8D)
-      .addTextDisplayComponents(t => t.setContent(`🔒 انتهى وقت التصويت.`));
+      .addTextDisplayComponents(t => t.setContent(`${EMOJIS.locked} انتهى وقت التصويت.`));
     await voteMsg.edit({ components: [disabledContainer], flags: MessageFlags.IsComponentsV2 });
   } catch (_) {}
 
@@ -1613,8 +1645,8 @@ async function runDoubleVotePhase(context, activePlayers, VOTE_TIME) {
 
 async function askDoubleAction(context, remainingPlayers) {
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('double_new_round').setLabel('🔄 جولة جديدة').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('double_direct_vote').setLabel('⚡ تصويت مباشر').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('double_new_round').setLabel(`${EMOJIS.bullet} جولة جديدة`).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('double_direct_vote').setLabel(`${EMOJIS.bolt} تصويت مباشر`).setStyle(ButtonStyle.Danger),
   );
   const msg = await context.channel.send({
     content: '**ماذا تريدون أن تفعلوا؟**\nاختيار: جولة جديدة (بتلميحات/أسئلة جديدة) أم تصويت مباشر؟',
@@ -1634,13 +1666,13 @@ async function askDoubleAction(context, remainingPlayers) {
   await new Promise(resolve => {
     collector.on('collect', i => {
       if (voters.has(i.user.id)) {
-        i.reply({ content: '⚠️ صوتت بالفعل!', ephemeral: true });
+        i.reply({ content: `${EMOJIS.warning} صوتت بالفعل!`, ephemeral: true });
         return;
       }
       voters.add(i.user.id);
       if (i.customId === 'double_new_round') votes.new_round++;
       else votes.direct_vote++;
-      i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+      i.reply({ content: `${EMOJIS.correct} تم تسجيل صوتك.`, ephemeral: true });
     });
     collector.on('end', resolve);
   });
@@ -1649,8 +1681,11 @@ async function askDoubleAction(context, remainingPlayers) {
   return votes.new_round >= votes.direct_vote ? 'new_round' : 'direct_vote';
 }
 
-async function endDoubleGame(context, winner, allSpies, allInnocents, originalPlayers, callback) {
+async function endDoubleGame(context, winner, allSpies, allInnocents, originalPlayers, round, lastWord, callback) {
   const pts = config.winPoints?.outsider ?? 100;
+  const roundText = `**الجولة:** ${round}`;
+  const wordText = lastWord ? `**الكلمة الأخيرة:** ||${lastWord}||` : '';
+
   if (winner === 'group') {
     for (const p of allInnocents) {
       await db.addPoints(p.id, pts);
@@ -1659,7 +1694,7 @@ async function endDoubleGame(context, winner, allSpies, allInnocents, originalPl
       components: [new ContainerBuilder()
         .setAccentColor(0x2ECC71)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🏆 المجموعة تفوز!\nتم كشف جميع الجواسيس.\nالجواسيس كانوا: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل فرد من المجموعة.`
+          `## ${EMOJIS.trophy} المجموعة تفوز!\n${roundText}\n${wordText}\nتم كشف جميع الجواسيس.\nالجواسيس كانوا: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل فرد من المجموعة.`
         ))
       ],
       flags: MessageFlags.IsComponentsV2,
@@ -1672,7 +1707,7 @@ async function endDoubleGame(context, winner, allSpies, allInnocents, originalPl
       components: [new ContainerBuilder()
         .setAccentColor(0xE74C3C)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🕵️ الجواسيس يفوزون!\nالجواسيس: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل جاسوس.`
+          `## ${EMOJIS.spyIcon} الجواسيس يفوزون!\n${roundText}\n${wordText}\nالجواسيس: ${allSpies.map(s => `<@${s.id}>`).join(', ')}\nالنقاط: ${pts} لكل جاسوس.`
         ))
       ],
       flags: MessageFlags.IsComponentsV2,
@@ -1682,7 +1717,7 @@ async function endDoubleGame(context, winner, allSpies, allInnocents, originalPl
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  🗳️  مرحلة التصويت (مع تحديث حي للأرقام وفرصة أخيرة للكلاسيكي)
+//  🗳️  مرحلة التصويت العامة (للأوضاع العادية)
 // ════════════════════════════════════════════════════════════════════
 
 async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode, mission, callback }) {
@@ -1691,10 +1726,10 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       new ContainerBuilder()
         .setAccentColor(0x8E44AD)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🗳️ مرحلة التصويت\n\n` +
+          `## ${EMOJIS.voteRequest} مرحلة التصويت\n\n` +
           `من تعتقد أنه **الجاسوس**؟\n` +
           `صوّت بالضغط على اسم اللاعب.\n` +
-          `-# ⏰ ${VOTE_TIME / 1000} ثانية للتصويت`,
+          `-# ${EMOJIS.timeout} ${VOTE_TIME / 1000} ثانية للتصويت`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
@@ -1720,14 +1755,14 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('vote_none')
-          .setLabel(`لا أشك بأحد 🤷 (${noneCount})`)
+          .setLabel(`لا أشك بأحد ${EMOJIS.noSuspect} (${noneCount})`)
           .setStyle(ButtonStyle.Primary),
       ),
     );
 
     const c = new ContainerBuilder()
       .setAccentColor(0x8E44AD)
-      .addTextDisplayComponents(t => t.setContent(`🗳️ صوّت على من تشك أنه الجاسوس:`));
+      .addTextDisplayComponents(t => t.setContent(`${EMOJIS.voteRequest} صوّت على من تشك أنه الجاسوس:`));
     rows.forEach(row => c.addActionRowComponents(r => {
       row.components.forEach(b => r.addComponents(b));
       return r;
@@ -1751,12 +1786,12 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
 
     col.on('collect', async i => {
       if (voters.has(i.user.id)) {
-        await i.reply({ content: '⚠️ صوّتت بالفعل!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.warning} صوّتت بالفعل!`, ephemeral: true });
         return;
       }
       const target = i.customId.replace('vote_', '');
       if (target !== 'none' && target === i.user.id) {
-        await i.reply({ content: '❌ لا يمكنك التصويت على نفسك!', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.cross} لا يمكنك التصويت على نفسك!`, ephemeral: true });
         return;
       }
       voters.add(i.user.id);
@@ -1765,7 +1800,7 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
       try {
         await i.update({ components: [buildVoteContainer(votes)], flags: MessageFlags.IsComponentsV2 });
       } catch (_) {
-        await i.reply({ content: '✅ تم تسجيل صوتك.', ephemeral: true });
+        await i.reply({ content: `${EMOJIS.correct} تم تسجيل صوتك.`, ephemeral: true });
       }
     });
 
@@ -1775,7 +1810,7 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
   try {
     const disabledContainer = new ContainerBuilder()
       .setAccentColor(0x7F8C8D)
-      .addTextDisplayComponents(t => t.setContent(`🔒 انتهى وقت التصويت.`));
+      .addTextDisplayComponents(t => t.setContent(`${EMOJIS.locked} انتهى وقت التصويت.`));
     await voteMsg.edit({ components: [disabledContainer], flags: MessageFlags.IsComponentsV2 });
   } catch (_) {}
 
@@ -1806,17 +1841,17 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
         new ContainerBuilder()
           .setAccentColor(0xE67E22)
           .addTextDisplayComponents(t => t.setContent(
-            `## 🎲 فرصة أخيرة للجاسوس!\n` +
+            `## ${EMOJIS.dice} فرصة أخيرة للجاسوس!\n` +
             `<@${outsider.id}> تم كشفك بالتصويت!\n` +
             `لديك **${lastGuessTime / 1000} ثانية** لتخمين الكلمة السرية بشكل علني.\n` +
             `إذا كانت تخمينك صحيحًا — تفوز رغم الكشف!\n` +
-            `-# اكتب الكلمة الآن في الشات`,
+            `-# استخدم الزر أدناه`,
           )),
       ],
       flags: MessageFlags.IsComponentsV2,
     });
 
-    const finalGuess = await collectMessage(context.channel, outsider.id, lastGuessTime);
+    const finalGuess = await askForInput(context.channel, outsider.id, lastGuessTime, 'guess');
     if (finalGuess) {
       const normalize = s => s.replace(/[\u064B-\u065F]/g, '').trim().toLowerCase();
       if (normalize(finalGuess) === normalize(word)) {
@@ -1825,7 +1860,7 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
           components: [
             new ContainerBuilder()
               .setAccentColor(0x2ECC71)
-              .addTextDisplayComponents(t => t.setContent(`✅ **"${finalGuess}"** — إصابة! الجاسوس خمن الكلمة الصحيحة!`)),
+              .addTextDisplayComponents(t => t.setContent(`${EMOJIS.correct} **"${finalGuess}"** — إصابة! الجاسوس خمن الكلمة الصحيحة!`)),
           ],
           flags: MessageFlags.IsComponentsV2,
         });
@@ -1834,7 +1869,7 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
           components: [
             new ContainerBuilder()
               .setAccentColor(0xE74C3C)
-              .addTextDisplayComponents(t => t.setContent(`❌ **"${finalGuess}"** — خطأ. الجاسوس فشل في التخمين.`)),
+              .addTextDisplayComponents(t => t.setContent(`${EMOJIS.cross} **"${finalGuess}"** — خطأ. الجاسوس فشل في التخمين.`)),
           ],
           flags: MessageFlags.IsComponentsV2,
         });
@@ -1844,7 +1879,7 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
         components: [
           new ContainerBuilder()
             .setAccentColor(0x7F8C8D)
-            .addTextDisplayComponents(t => t.setContent(`⏰ لم يتم التخمين في الوقت المحدد.`)),
+            .addTextDisplayComponents(t => t.setContent(`${EMOJIS.timeout} لم يتم التخمين في الوقت المحدد.`)),
         ],
         flags: MessageFlags.IsComponentsV2,
       });
@@ -1859,16 +1894,16 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
   let resultText;
   if (mode === 'classic') {
     if (voteCorrect && spyWins) {
-      resultText = `🕵️ الجاسوس كُشف لكنه خمّن الكلمة الصحيحة — **الجاسوس يفوز!**`;
+      resultText = `${EMOJIS.spyIcon} الجاسوس كُشف لكنه خمّن الكلمة الصحيحة — **الجاسوس يفوز!**`;
     } else if (voteCorrect) {
-      resultText = `🎯 المجموعة كشفت الجاسوس ولم يخمن الكلمة — **المجموعة تفوز!**`;
+      resultText = `${EMOJIS.classic} المجموعة كشفت الجاسوس ولم يخمن الكلمة — **المجموعة تفوز!**`;
     } else {
-      resultText = `🕵️ الجاسوس نجا من الكشف — **الجاسوس يفوز!**`;
+      resultText = `${EMOJIS.spyIcon} الجاسوس نجا من الكشف — **الجاسوس يفوز!**`;
     }
   } else {
     resultText = voteCorrect
-      ? `🎯 المجموعة كشفت الجاسوس — **المجموعة تفوز!**`
-      : `🕵️ الجاسوس نجا — **الجاسوس يفوز!**`;
+      ? `${EMOJIS.classic} المجموعة كشفت الجاسوس — **المجموعة تفوز!**`
+      : `${EMOJIS.spyIcon} الجاسوس نجا — **الجاسوس يفوز!**`;
   }
 
   if (winner === 'outsider') {
@@ -1879,21 +1914,20 @@ async function runVotePhase({ context, players, outsider, word, VOTE_TIME, mode,
     }
   }
 
-  // ══ سجل الحكم: نتيجة التصويت والنتيجة النهائية ══
-  await sendJudgeDM(context.client, `🗳️ نتيجة التصويت (${mode}):\n${voteSummary.join('\n')}\n- الجاسوس الحقيقي: ${outsider.displayName}\n- الفائز: ${winner === 'outsider' ? 'الجاسوس' : 'المجموعة'}`);
+  await sendJudgeDM(context.client, `${EMOJIS.voteRequest} نتيجة التصويت (${mode}):\n${voteSummary.join('\n')}\n- الجاسوس الحقيقي: ${outsider.displayName}\n- الفائز: ${winner === 'outsider' ? 'الجاسوس' : 'المجموعة'}`);
 
   await context.channel.send({
     components: [
       new ContainerBuilder()
         .setAccentColor(winner === 'outsider' ? 0xE74C3C : 0x2ECC71)
         .addTextDisplayComponents(t => t.setContent(
-          `## 🏆 النتيجة النهائية\n\n` +
+          `## ${EMOJIS.trophy} النتيجة النهائية\n\n` +
           `**الجاسوس كان:** <@${outsider.id}> (${outsider.displayName})\n` +
           `**الكلمة السرية كانت:** ||${word}||\n` +
           (mission ? `**المهمة السرية:** ${mission}\n` : '') +
           `\n${resultText}\n\n` +
           `**نتائج التصويت:**\n${voteSummary.join('\n') || '> لا أحد صوّت'}\n\n` +
-          `**النقاط المكتسبة:** 🏅 ${pts} نقطة لكل من ${winner === 'outsider' ? `<@${outsider.id}>` : players.filter(p => p.id !== outsider.id).map(p => `<@${p.id}>`).join(', ')}`,
+          `**النقاط المكتسبة:** ${EMOJIS.points} ${pts} نقطة لكل من ${winner === 'outsider' ? `<@${outsider.id}>` : players.filter(p => p.id !== outsider.id).map(p => `<@${p.id}>`).join(', ')}`,
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
@@ -1913,28 +1947,12 @@ async function revealResults({ context, outsider, word, mode, mission }) {
       new ContainerBuilder()
         .setAccentColor(0xF39C12)
         .addTextDisplayComponents(t => t.setContent(
-          `## 📊 كشف الأوراق\n\n` +
+          `## ${EMOJIS.reveal} كشف الأوراق\n\n` +
           `**الجاسوس:** <@${outsider.id}>\n` +
           `**الكلمة السرية:** ||${word}||\n` +
           (mission ? `**المهمة:** ${mission}` : ''),
         )),
     ],
     flags: MessageFlags.IsComponentsV2,
-  });
-}
-
-// ════════════════════════════════════════════════════════════════════
-//  مساعد: جمع رسالة واحدة من مستخدم معين
-// ════════════════════════════════════════════════════════════════════
-
-function collectMessage(channel, userId, timeout) {
-  return new Promise(resolve => {
-    const col = channel.createMessageCollector({
-      filter: m => m.author.id === userId,
-      time: timeout,
-      max: 1,
-    });
-    col.on('collect', m => resolve(m.content.trim()));
-    col.on('end', c => { if (c.size === 0) resolve(null); });
   });
 }
