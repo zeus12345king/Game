@@ -229,9 +229,6 @@ async function startGame(context, nowTime, callback) {
 
   collector.on("end", async () => {
     // إرسال رسالة جديدة عند انتهاء الوقت، دون تعديل رسالة اللوبي
-    await context.channel.send(
-      `## ${EMOJI.LOBBY} لعبة ريبلكا\n**انتهى وقت الانضمام للعبة!**\n\n**اللاعبون المشاركون (${players.length}):** ${players.length > 0 ? players.map(p => `<@${p.id}>`).join(', ') : 'لا يوجد'}`
-    );
 
     if (players.length < MIN_PLAYERS) {
       await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
