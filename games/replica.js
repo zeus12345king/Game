@@ -30,6 +30,7 @@ const EMOJI = {
   QUESTION_MARK: '❓',                      // لم تكن في اللعبة
   FULL_GAME: '🚪',                          // اللعبة ممتلئة
   ALREADY_IN: '🚫',                         // موجود مسبقاً
+  PLAYERS: '👥',                            // أيقونة اللاعبين (يمكن استبدالها بإيموجي مخصص من السيرفر)
 };
 
 // ======================== أيقونات أرقام مخصصة للوبي فقط ========================
@@ -82,6 +83,9 @@ const ARABIC_LETTERS = [
     'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ك', 'ل', 'م', 'ن', 'ه', 'و', 'ي'
 ];
 const CATEGORIES = ['اسم إنسان', 'اسم حيوان', 'اسم نبات', 'اسم جماد', 'اسم دولة'];
+
+// تخزين نتائج التحقق من وجود دولة لكل حرف (كي لا نكرر النداء)
+const countryCache = {};
 
 module.exports = {
   name: 'replica',
@@ -228,7 +232,7 @@ async function startGame(context, nowTime, callback) {
     // رسالة بداية اللعبة (مثل تصميم المافيا)
     await context.channel.send(`${EMOJI.SUCCESS} | تم تسجيل اللاعبين، ستبدأ الجولة الأولى بعد قليل...`);
     const allPlayersMentions = players.map(p => `<@${p.id}>`).join(' ');
-    await context.channel.send(`**اللاعبون المشاركون:**\n${allPlayersMentions}`);
+    await context.channel.send(`${EMOJI.PLAYERS} **اللاعبون المشاركون:**\n${allPlayersMentions}`);
     await sleep(3000);
 
     await context.channel.send(`${EMOJI.OK} | اكتمل عدد اللاعبين! اللعبة ستبدأ الآن...`);
@@ -258,26 +262,45 @@ async function runLetterRound(context, callback, letterIndex) {
     await context.channel.send(`${EMOJI.ANNOUNCE} حرف هذه الجولة هو **${letter}**`);
     await sleep(2000);
 
-    let eliminatedThisRound = [];
-    let turnOrder = [...players].sort(() => 0.5 - Math.random());
+    // تحديد التصنيفات النشطة (إذا كان للحرف دولة تبدأ به)
+    const countryExists = await checkCountryExists(letter);
+    const activeCategories = ['اسم إنسان', 'اسم حيوان', 'اسم نبات', 'اسم جماد'];
+    if (countryExists) {
+        activeCategories.push('اسم دولة');
+    }
 
-    const turnsToPlay = Math.min(players.length, CATEGORIES.length);
+    // ترتيب اللاعبين بشكل عشوائي ثم التناوب الدائري
+    const playerQueue = [...players].sort(() => 0.5 - Math.random());
 
-    for (let i = 0; i < turnsToPlay; i++) {
-        if (await checkWin(context, callback)) return letterIndex + 1; // لن نكمل لكن نرجع أي قيمة
+    for (const category of activeCategories) {
+        // إذا لم يبقَ لاعبون نكسر الحلقة
+        if (playerQueue.length === 0) break;
 
-        const category = CATEGORIES[i];
-        const currentPlayer = turnOrder.pop();
+        // قبل السؤال عن الفئة، نتحقق من الفوز (لاعب واحد متبقٍ)
+        if (await checkWin(context, callback)) return letterIndex + 1;
+
+        // نأخذ اللاعب التالي من الطابور
+        const currentPlayer = playerQueue.shift();
 
         const survived = await askQuestion(context, currentPlayer, letter, category);
 
         if (!survived) {
-            eliminatedThisRound.push(currentPlayer);
+            // إخراج اللاعب من القائمة الرئيسية
             players = players.filter(p => p.id !== currentPlayer.id);
             await lose(currentPlayer.id, context);
+            // اللاعب الذي خرج لا يعاد إلى الطابور
+        } else {
+            // إذا أجاب صحيحاً يعاد إلى نهاية الطابور ليمثل في فئات أخرى إن تطلب الأمر
+            playerQueue.push(currentPlayer);
         }
 
         await sleep(2000);
+    }
+
+    // رسالة اللاعبين المتبقين بعد نهاية الجولة (إذا لم تنتهِ اللعبة بعد)
+    if (players.length > 1) {
+        const remainingMentions = players.map(p => `<@${p.id}>`).join(' ');
+        await context.channel.send(`${EMOJI.PLAYERS} **اللاعبون المتبقون بعد الجولة:**\n${remainingMentions}`);
     }
 
     return letterIndex + 1; // الحرف التالي
@@ -385,6 +408,51 @@ async function validateAnswer(letter, category, answer) {
         return resultText.includes("نعم");
     } catch (error) {
         console.error("❌ Error validating with AI:", error);
+        return false;
+    }
+}
+
+// ======================== التحقق من وجود دولة تبدأ بحرف معين ========================
+async function checkCountryExists(letter) {
+    // استخدام التخزين المؤقت لتجنب تكرار النداء
+    if (countryCache[letter] !== undefined) {
+        return countryCache[letter];
+    }
+
+    const prompt = `هل توجد دولة تبدأ بحرف "${letter}"؟ أجب بـ "نعم" أو "لا" فقط.`;
+
+    try {
+        const response = await fetch('https://yaniis.alwaysdata.net/api/api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: "gemini3.1pro",
+                question: prompt
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const rawText = await response.text();
+        let resultText = rawText;
+
+        try {
+            const json = JSON.parse(rawText);
+            if (json.response) resultText = json.response;
+            else if (json.answer) resultText = json.answer;
+            else if (json.text) resultText = json.text;
+            else if (json.result) resultText = json.result;
+        } catch (_) { }
+
+        const exists = resultText.includes("نعم");
+        countryCache[letter] = exists;
+        return exists;
+    } catch (error) {
+        console.error("❌ Error checking country existence:", error);
+        // في حال الفشل نفترض عدم وجود دولة (أمان)
+        countryCache[letter] = false;
         return false;
     }
 }
