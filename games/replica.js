@@ -23,14 +23,14 @@ const EMOJI = {
   WIN: '🏆',                                 // فوز
   LOSE: '💀',                               // خسارة
   OK: '<:z1:1515940737760362648>',          // موافقة / تم
-  ANNOUNCE: '📢',                           // إعلان (حرف جديد مثلاً)
+  ANNOUNCE: '<:z11:1512224011357126948>',                           // إعلان (حرف جديد مثلاً)
   BULLET: '💥',                             // غير مستخدم حالياً لكنه محجوز
-  PLAYER_JOIN: '🎉',                        // رسالة تأكيد انضمام
+  PLAYER_JOIN: '<:z3:1511872921142825040>',                        // رسالة تأكيد انضمام
   PLAYER_LEAVE: '👋',                       // رسالة تأكيد خروج
   QUESTION_MARK: '❓',                      // لم تكن في اللعبة
   FULL_GAME: '🚪',                          // اللعبة ممتلئة
-  ALREADY_IN: '🚫',                         // موجود مسبقاً
-  PLAYERS: '👥',                            // أيقونة اللاعبين (يمكن استبدالها بإيموجي مخصص من السيرفر)
+  ALREADY_IN: '<:z16:1515274356845056162>',                         // موجود مسبقاً
+  PLAYERS: '<:z18:1515279195201339392>',                            // أيقونة اللاعبين (يمكن استبدالها بإيموجي مخصص من السيرفر)
 };
 
 // ======================== أيقونات أرقام مخصصة للوبي فقط ========================
@@ -246,6 +246,9 @@ async function gameLoop(context, callback, letterIndex) {
 
     const nextIndex = await runLetterRound(context, callback, letterIndex);
 
+    // *** التعديل الأول: إذا انتهت اللعبة أثناء الجولة، توقف فوراً ***
+    if (!GAME_ACTIVE) return;
+
     await sleep(4000);
 
     if (nextIndex < ARABIC_LETTERS.length) {
@@ -296,6 +299,9 @@ async function runLetterRound(context, callback, letterIndex) {
 
         await sleep(2000);
     }
+
+    // *** التعديل الثاني: إذا انتهت اللعبة خلال الجولة، لا تظهر رسالة المتبقين وتوقف ***
+    if (!GAME_ACTIVE) return letterIndex + 1;
 
     // رسالة اللاعبين المتبقين بعد نهاية الجولة (إذا لم تنتهِ اللعبة بعد)
     if (players.length > 1) {
