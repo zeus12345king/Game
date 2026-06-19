@@ -5,34 +5,31 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
-  EmbedBuilder,
-  InteractionWebhook,
-  AttachmentBuilder,
-  StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
 } = require("discord.js");
 const db = require('../database.js');
 const config = require('../config.js');
-const path = require("path");
-const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
-const fetch = require("node-fetch"); // تأكد من تثبيت node-fetch إذا كنت تستخدم إصدار Node أقل من 18
 
 // ======================== الإيموجيات الموحدة ========================
 const EMOJI = {
-  LOBBY: '🔠',                              // يستخدم في عنوان اللوبي وأيقونة اللعبة
-  JOIN: '<:z1:1511780346008436946>',        // زر الدخول في اللوبي (أخضر)
-  LEAVE: '<:z2:1511780387506880542>',       // زر الخروج في اللوبي (أحمر)
-  WARNING: '<:z16:1515274356845056162>',    // تنبيه / تحذير (مثل لاعب موجود مسبقاً)
-  SUCCESS: '<:z3:1511872921142825040>',     // نجاح العملية (توزيع الأدوار، بدء الجولة)
-  ERROR: '<:z4:1511873048557387977>',       // خطأ (اللعبة ممتلئة، لم تكن في اللعبة...)
-  TIMER: '<:z15:1515273469389181071>',      // التوقيت المتبقي / مؤقت
-  KICK: '<:z6:1512127272184975360>',        // طرد / إقصاء لاعب
-  SKIP: '⏭️',                               // تخطي (عند تعادل التصويت)
+  LOBBY: '🔠',                              // يستخدم في عنوان اللوبي
+  JOIN: '<:z1:1511780346008436946>',        // زر الدخول (أخضر)
+  LEAVE: '<:z2:1511780387506880542>',       // زر الخروج (أحمر)
+  WARNING: '<:z16:1515274356845056162>',    // تنبيه / تحذير
+  SUCCESS: '<:z3:1511872921142825040>',     // نجاح (تسجيل، بدء)
+  ERROR: '<:z4:1511873048557387977>',       // خطأ
+  TIMER: '<:z15:1515273469389181071>',      // التوقيت / مؤقت
+  KICK: '<:z6:1512127272184975360>',        // طرد / إقصاء
+  SKIP: '⏭️',                               // تخطي (تعادل أو إنهاء)
   WIN: '🏆',                                 // فوز
   LOSE: '💀',                               // خسارة
-  VOTE: '<:z20:1515282515982815282>',       // أيقونة التصويت (غير مستخدمة هنا، محجوزة)
   OK: '<:z1:1515940737760362648>',          // موافقة / تم
-  ANNOUNCE: '📢',                           // إعلان
+  ANNOUNCE: '📢',                           // إعلان (حرف جديد مثلاً)
+  BULLET: '💥',                             // غير مستخدم حالياً لكنه محجوز
+  PLAYER_JOIN: '🎉',                        // رسالة تأكيد انضمام
+  PLAYER_LEAVE: '👋',                       // رسالة تأكيد خروج
+  QUESTION_MARK: '❓',                      // لم تكن في اللعبة
+  FULL_GAME: '🚪',                          // اللعبة ممتلئة
+  ALREADY_IN: '🚫',                         // موجود مسبقاً
 };
 
 // ======================== أيقونات أرقام مخصصة للوبي فقط ========================
@@ -74,20 +71,18 @@ function parseCustomEmoji(emojiString) {
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 15;
 const TIME_TO_START = config.lobbyTime.replica;
-const TIME_TO_ANSWER = 15000; // 15 ثانية للإجابة
-
-const ARABIC_LETTERS = [
-  'أ', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'س', 'ش', 'ص',
-  'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ك', 'ل', 'م', 'ن', 'ه', 'و', 'ي'
-];
-
-const CATEGORIES = ['اسم إنسان', 'اسم حيوان', 'اسم نبات', 'اسم جماد', 'اسم دولة'];
+const TIME_TO_ANSWER = 15000;
 
 let GAME_ACTIVE = false;
 let players = [];
-let usedWords = []; // لتتبع الكلمات المستخدمة ومنع التكرار
+let usedWords = []; // الكلمات التي سبق استخدامها (لمنع التكرار)
 
-// ======================== نقطة البداية ========================
+const ARABIC_LETTERS = [
+    'أ', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'س', 'ش', 'ص',
+    'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ك', 'ل', 'م', 'ن', 'ه', 'و', 'ي'
+];
+const CATEGORIES = ['اسم إنسان', 'اسم حيوان', 'اسم نبات', 'اسم جماد', 'اسم دولة'];
+
 module.exports = {
   name: 'replica',
   aliases: ["ريبلكا"],
@@ -115,280 +110,301 @@ function sleep(time) {
 }
 
 function getRandomWinPoints() {
-  const pts = config.winPoints.replica;
-  if (typeof pts === 'object') return Math.floor(Math.random() * (pts.max - pts.min + 1)) + pts.min;
-  return pts;
+    const pts = config.winPoints.replica;
+    if (typeof pts === 'object') return Math.floor(Math.random() * (pts.max - pts.min + 1)) + pts.min;
+    return pts;
 }
 
 async function win(playerId, context) {
   try {
     const points = getRandomWinPoints();
     await db.addPoints(playerId, points);
-    await context.channel.send(`${EMOJI.WIN} | <@${playerId}> فاز بـ **${points}** نقطة!`).catch(() => {});
+    if (context) context.channel.send(`${EMOJI.WIN} | <@${playerId}> فاز بـ **${points}** نقطة!`).catch(() => {});
   } catch (e) {
-    console.error(`[Replica] Failed to apply win points: ${e}`);
+    console.error(`[Replica] Failed to apply win points: ${e}`)
   }
 }
-async function lose(playerId, context) {
-  // لا خسارة نقاط حالياً
-}
-
-// ======================== التحقق بواسطة الذكاء الاصطناعي ========================
-async function isValidWord(word, letter, category) {
-  // نرسل طلباً إلى خدمة الذكاء الاصطناعي المحددة في config
-  const apiKey = config.ai?.apiKey;
-  const endpoint = config.ai?.endpoint || "https://api.openai.com/v1/chat/completions";
-  const model = config.ai?.model || "gpt-4o-mini";
-
-  if (!apiKey) {
-    // في حالة عدم وجود إعدادات الذكاء الاصطناعي، نعتمد على قواعد بسيطة كحل مؤقت
-    console.warn("[Replica] No AI config found, using fallback logic (not recommended).");
-    // تحقق بسيط: الحرف الأول مطابق والكلمة على الأقل 2 أحرف
-    if (!word.startsWith(letter) || word.length < 2) return false;
-    // تحقق بدائي من التصنيف (يمكن إزالته لاحقاً بعد تفعيل AI)
-    if (category === 'اسم نبات') return !['بصل', 'تفاح', 'جزر', 'زيتون'].includes(word); // مجرد مثال
-    return true;
-  }
-
-  try {
-    const prompt = `
-    أنت مدقق لغوي دقيق. هل الكلمة "${word}" (تكتب بالأحرف العربية) تبدأ فعلاً بحرف "${letter}" وتنتمي حقيقةً إلى فئة "${category}"؟
-    أجب بـ "yes" إذا كانت الإجابة صحيحة، أو "no" إذا كانت خاطئة، مع تفسير مختصر.
-    ملاحظة: لا تعتبر الكلمة صحيحة إذا كانت تنتمي إلى فئة مختلفة (مثلاً نبات لا يصبح جماداً، والعكس).
-    `;
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: "أنت مساعد مفيد." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 10
-      })
-    });
-
-    const data = await response.json();
-    const answer = data.choices?.[0]?.message?.content?.toLowerCase().trim();
-    return answer === 'yes';
-  } catch (e) {
-    console.error("[Replica] AI validation error:", e);
-    // في حال فشل الاتصال، نرفض الكلمة حفاظاً على نزاهة اللعبة
-    return false;
-  }
-}
+async function lose(playerId, context) { }
 
 // ======================== بناء واجهة اللوبي (بنفس تصميم المافيا) ========================
-function buildLobbyEmbed(guildName, nowTime, lobbyPlayers) {
-  const embed = new EmbedBuilder()
-    .setColor(config.colors.replica || 0x9B59B6)
-    .setTitle(guildName)
-    .setDescription(
-      `__**شرح اللعبة:**__\n` +
-      `1- انضم للعبة عبر الضغط على زر دخول ${EMOJI.JOIN} الموجود في الأسفل.\n` +
-      `2- تبدأ اللعبة باختيار حرف عربي، ثم يحصل كل لاعب على فئة (إنسان، حيوان، نبات، جماد، دولة).\n` +
-      `3- يجب على كل لاعب في دوره أن يكتب كلمة تبدأ بالحرف المختار وتنتمي للفئة المخصصة له.\n` +
-      `4- يتم التحقق من صحة الكلمة بالذكاء الاصطناعي، ولا يسمح بتكرار الكلمات. من يخطئ يخرج، والفائز آخر لاعب متبقٍ.\n\n` +
-      `> ${EMOJI.TIMER} الوقت المتبقي: <t:${nowTime + TIME_TO_START / 1000}:R>\n\n` +
-      `> **(${lobbyPlayers.length}/${MAX_PLAYERS})**\n\n` +
-      `**المشاركين حاليا:**\n` +
-      (lobbyPlayers.length
-        ? lobbyPlayers.map((p, i) => `> ${lobbyNumberEmoji(i + 1)} <@${p.id}>`).join('\n')
-        : `> لا يوجد لاعبين بعد`)
-    );
-
-  const lobbyImage = config.lobbyImages.replica;
-  if (lobbyImage) embed.setImage(lobbyImage);
-
-  return embed;
-}
-
-function buildLobbyButtons() {
-  const joinEmoji = parseCustomEmoji(EMOJI.JOIN);
-  const leaveEmoji = parseCustomEmoji(EMOJI.LEAVE);
-
-  const joinButton = new ButtonBuilder()
-    .setCustomId('join')
-    .setLabel('دخول')
-    .setStyle(ButtonStyle.Secondary);
-  if (joinEmoji) joinButton.setEmoji({ id: joinEmoji.id, name: joinEmoji.name, animated: false });
-
-  const leaveButton = new ButtonBuilder()
-    .setCustomId('exit')
-    .setLabel('خروج')
-    .setStyle(ButtonStyle.Secondary);
-  if (leaveEmoji) leaveButton.setEmoji({ id: leaveEmoji.id, name: leaveEmoji.name, animated: false });
-
-  return new ActionRowBuilder().addComponents(joinButton, leaveButton);
-}
-
-// ======================== دالة بدء اللعبة (اللوبي ثم الجولات) ========================
 async function startGame(context, nowTime, callback) {
   players = [];
-  usedWords = [];
-  const guildName = context.guild.name;
 
-  const embed = buildLobbyEmbed(guildName, nowTime, players);
-  const buttons = buildLobbyButtons();
+  function buildLobby(time, lobbyPlayers) {
+    const joinEmoji = parseCustomEmoji(EMOJI.JOIN);
+    const leaveEmoji = parseCustomEmoji(EMOJI.LEAVE);
 
-  let sentMessage;
-  try {
-    sentMessage = await context.reply({
-      embeds: [embed],
-      components: [buttons],
-      fetchReply: true,
-    });
+    // شرح اللعبة مثل المافيا
+    const description = [
+      `__**شرح اللعبة:**__`,
+      `1- انضم للعبة عبر الضغط على زر دخول ${EMOJI.JOIN} الموجود في الأسفل.`,
+      `2- تبدأ اللعبة باختيار حرف عربي، ثم يحصل كل لاعب على فئة (إنسان، حيوان، نبات، جماد، دولة).`,
+      `3- يجب على كل لاعب في دوره أن يكتب كلمة تبدأ بالحرف المختار وتنتمي للفئة المخصصة له.`,
+      `4- يتم التحقق من صحة الكلمة بالذكاء الاصطناعي، ولا يسمح بتكرار الكلمات. من يخطئ يخرج، والفائز آخر لاعب متبقٍ.`,
+      ``,
+      `> ${EMOJI.TIMER} الوقت المتبقي: <t:${time + TIME_TO_START / 1000}:R>`,
+      ``,
+      `> **(${lobbyPlayers.length}/${MAX_PLAYERS})**`,
+      ``,
+      `**المشاركين حاليا:**`,
+      (lobbyPlayers.length ? lobbyPlayers.map((p, i) => `> ${lobbyNumberEmoji(i + 1)} <@${p.id}>`).join('\n') : `> لا يوجد لاعبين بعد`)
+    ].join('\n');
 
-    const filter = (i) => i.customId === "join" || i.customId === "exit";
-    const collector = sentMessage.createMessageComponentCollector({ filter, time: TIME_TO_START });
+    const container = new ContainerBuilder()
+      .setAccentColor(config.colors.replica)
+      .addTextDisplayComponents(t => t.setContent(description))
+      .addMediaGalleryComponents(g => {
+        const img = config.lobbyImages.replica;
+        if (img) g.addItems(item => item.setURL(img));
+        return g;
+      })
+      .addActionRowComponents(r => {
+        const joinBtn = new ButtonBuilder().setCustomId('join').setLabel('دخول').setStyle(ButtonStyle.Secondary);
+        if (joinEmoji) joinBtn.setEmoji({ id: joinEmoji.id, name: joinEmoji.name, animated: false });
 
-    collector.on("collect", async (i) => {
-      if (i.customId === "join") {
-        if (players.length < MAX_PLAYERS) {
-          if (!players.some(p => p.id === i.user.id)) {
-            players.push({
-              id: i.user.id,
-              displayName: i.member?.displayName || i.user.displayName,
-              avatarURL: i.user.displayAvatarURL({ extension: "png", forceStatic: true }) || "https://cdn.discordapp.com/embed/avatars/0.png",
-            });
-            await i.update({ embeds: [buildLobbyEmbed(guildName, nowTime, players)], components: [buildLobbyButtons()] });
-          } else {
-            await i.reply({ content: `${EMOJI.WARNING} أنت بالفعل في اللعبة!`, ephemeral: true });
-          }
-        } else {
-          await i.reply({ content: `${EMOJI.KICK} اللعبة ممتلئة!`, ephemeral: true });
-        }
-      } else if (i.customId === "exit") {
-        if (players.some(p => p.id === i.user.id)) {
-          players = players.filter(p => p.id !== i.user.id);
-          await i.update({ embeds: [buildLobbyEmbed(guildName, nowTime, players)], components: [buildLobbyButtons()] });
-        } else {
-          await i.reply({ content: `${EMOJI.ERROR} لم تكن في اللعبة.`, ephemeral: true });
-        }
-      }
-    });
+        const leaveBtn = new ButtonBuilder().setCustomId('exit').setLabel('خروج').setStyle(ButtonStyle.Secondary);
+        if (leaveEmoji) leaveBtn.setEmoji({ id: leaveEmoji.id, name: leaveEmoji.name, animated: false });
 
-    collector.on("end", async () => {
-      if (players.length < MIN_PLAYERS) {
-        await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
-        resetGameData();
-        callback(null, false, 0, "Not enough players");
-        return;
-      }
+        return r.setComponents(joinBtn, leaveBtn);
+      });
 
-      // ====== رسالة بداية اللعبة (تصميم مافيا لكن بدون فريقين) ======
-      await context.channel.send(`${EMOJI.SUCCESS} | تم تسجيل اللاعبين، ستبدأ الجولة الأولى بعد قليل...`);
-      const playersList = players.map(p => `<@${p.id}>`).join(' ');
-      await context.channel.send(`**اللاعبون المشاركون:**\n${playersList}`);
-      await sleep(3000);
-
-      // ====== بدء الجولات ======
-      await gameRoundLoop(context, players, callback);
-    });
-
-  } catch (error) {
-    console.error("Error starting the game:", error);
-    resetGameData();
-    callback(null, false, 0, "Error starting game");
-    if (context.channel) {
-      await context.channel.send(`${EMOJI.ERROR} حدث خطأ أثناء بدء اللعبة. يرجى المحاولة مرة أخرى.`);
-    }
+    return container;
   }
+
+  const sentMessage = await context.reply({
+    components: [buildLobby(nowTime, players)],
+    flags: MessageFlags.IsComponentsV2,
+    fetchReply: true,
+  });
+
+  const filter = (i) => i.customId === "join" || i.customId === "exit";
+  const collector = sentMessage.createMessageComponentCollector({ filter, time: TIME_TO_START });
+
+  collector.on("collect", async (i) => {
+    if (i.customId === "join") {
+      if (players.length < MAX_PLAYERS) {
+        if (!players.some(p => p.id === i.user.id)) {
+          players.push({
+            id: i.user.id,
+            displayName: i.user.displayName,
+            avatarURL: i.user.displayAvatarURL({ extension: "png", forceStatic: true }) || "https://cdn.discordapp.com/embed/avatars/0.png",
+          });
+          await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+          await i.followUp({ content: `${EMOJI.PLAYER_JOIN} لقد انضممت إلى اللعبة!`, ephemeral: true });
+        } else {
+          await i.reply({ content: `${EMOJI.ALREADY_IN} أنت بالفعل في اللعبة!`, ephemeral: true });
+        }
+      } else {
+        await i.reply({ content: `${EMOJI.FULL_GAME} اللعبة ممتلئة!`, ephemeral: true });
+      }
+    } else if (i.customId === "exit") {
+      if (players.some(p => p.id === i.user.id)) {
+        players = players.filter((p) => p.id !== i.user.id);
+        await i.update({ components: [buildLobby(nowTime, players)], flags: MessageFlags.IsComponentsV2 });
+        await i.followUp({ content: `${EMOJI.PLAYER_LEAVE} لقد غادرت اللعبة.`, ephemeral: true });
+      } else {
+        await i.reply({ content: `${EMOJI.QUESTION_MARK} لم تكن في اللعبة.`, ephemeral: true });
+      }
+    }
+  });
+
+  collector.on("end", async () => {
+    try {
+      const endContainer = new ContainerBuilder()
+        .setAccentColor(0x5865F2)
+        .addTextDisplayComponents(t => t.setContent(
+          `## ${EMOJI.LOBBY} لعبة ريبلكا\n**انتهى وقت الانضمام للعبة!**\n\n**اللاعبون المشاركون (${players.length}):** ${players.length > 0 ? players.map(p => `<@${p.id}>`).join(', ') : 'لا يوجد'}`
+        ));
+      await sentMessage.edit({ components: [endContainer], flags: MessageFlags.IsComponentsV2 });
+    } catch (error) { /* ignore */ }
+
+    if (players.length < MIN_PLAYERS) {
+      await context.channel.send(`${EMOJI.KICK} لم يكن هناك عدد كافٍ من اللاعبين لبدء اللعبة.`);
+      resetGameData();
+      callback();
+      return;
+    }
+
+    // رسالة بداية اللعبة (مثل تصميم المافيا)
+    await context.channel.send(`${EMOJI.SUCCESS} | تم تسجيل اللاعبين، ستبدأ الجولة الأولى بعد قليل...`);
+    const allPlayersMentions = players.map(p => `<@${p.id}>`).join(' ');
+    await context.channel.send(`**اللاعبون المشاركون:**\n${allPlayersMentions}`);
+    await sleep(3000);
+
+    await context.channel.send(`${EMOJI.OK} | اكتمل عدد اللاعبين! اللعبة ستبدأ الآن...`);
+    await gameLoop(context, callback, 0); // نبدأ من الحرف الأول (أ)
+  });
 }
 
-// ======================== الحلقة الرئيسية للجولات ========================
-async function gameRoundLoop(context, currentPlayers, callback) {
-  // ترتيب اللاعبين حسب دخولهم (كما هم)
-  let alivePlayers = [...currentPlayers];
-  let letterIndex = 0; // ابدأ من أول حرف (الألف)
+// ======================== الحلقة الرئيسية (مع ترتيب الحروف) ========================
+async function gameLoop(context, callback, letterIndex) {
+    if (await checkWin(context, callback)) return;
 
-  // نستخدم ترتيب ثابت للحروف حسب ARABIC_LETTERS
-  while (alivePlayers.length > 1 && letterIndex < ARABIC_LETTERS.length) {
-    const currentLetter = ARABIC_LETTERS[letterIndex];
-    await context.channel.send(`\n${EMOJI.ANNOUNCE} | **الحرف الجديد: ${currentLetter}**`);
+    const nextIndex = await runLetterRound(context, callback, letterIndex);
 
-    // نوزع الفئات على اللاعبين الأحياء (تكرار القائمة حسب الحاجة)
-    const categoriesForRound = [];
-    for (let i = 0; i < alivePlayers.length; i++) {
-      categoriesForRound.push(CATEGORIES[i % CATEGORIES.length]);
+    await sleep(4000);
+
+    if (nextIndex < ARABIC_LETTERS.length) {
+        await gameLoop(context, callback, nextIndex);
+    } else {
+        await context.channel.send(`${EMOJI.SKIP} انتهت جميع الحروف دون فائز وحيد.`);
+        resetGameData();
+        callback();
+    }
+}
+
+async function runLetterRound(context, callback, letterIndex) {
+    const letter = ARABIC_LETTERS[letterIndex];
+    await context.channel.send(`${EMOJI.ANNOUNCE} حرف هذه الجولة هو **${letter}**`);
+    await sleep(2000);
+
+    let eliminatedThisRound = [];
+    let turnOrder = [...players].sort(() => 0.5 - Math.random());
+
+    const turnsToPlay = Math.min(players.length, CATEGORIES.length);
+
+    for (let i = 0; i < turnsToPlay; i++) {
+        if (await checkWin(context, callback)) return letterIndex + 1; // لن نكمل لكن نرجع أي قيمة
+
+        const category = CATEGORIES[i];
+        const currentPlayer = turnOrder.pop();
+
+        const survived = await askQuestion(context, currentPlayer, letter, category);
+
+        if (!survived) {
+            eliminatedThisRound.push(currentPlayer);
+            players = players.filter(p => p.id !== currentPlayer.id);
+            await lose(currentPlayer.id, context);
+        }
+
+        await sleep(2000);
     }
 
-    // نمر على كل لاعب ونجعله يجيب
-    for (let i = 0; i < alivePlayers.length; i++) {
-      const player = alivePlayers[i];
-      const category = categoriesForRound[i];
+    return letterIndex + 1; // الحرف التالي
+}
 
-      // إرسال تحدي للاعب
-      const challengeMsg = await context.channel.send(
-        `<@${player.id}> ${EMOJI.TIMER} | دورك! الفئة: **${category}** - الحرف: **${currentLetter}**\nاكتب كلمة تبدأ بالحرف وتنتمي للفئة خلال ${TIME_TO_ANSWER / 1000} ثانية:`
-      );
+async function askQuestion(context, player, letter, category) {
+    return new Promise(async (resolve) => {
+        const questionMsg = await context.channel.send(
+          `${EMOJI.TIMER} <@${player.id}> لديك **${TIME_TO_ANSWER / 1000} ثانية** لإرسال **${category}** يبدأ بحرف **${letter}**.`
+        );
 
-      // انتظار رد اللاعب
-      let answered = false;
-      let valid = false;
-      try {
-        const collected = await context.channel.awaitMessages({
-          filter: m => m.author.id === player.id && !m.author.bot,
-          max: 1,
-          time: TIME_TO_ANSWER,
-          errors: ['time'],
+        const filter = m => m.author.id === player.id && m.channel.id === context.channel.id;
+        const collector = context.channel.createMessageCollector({ filter, time: TIME_TO_ANSWER, max: 1 });
+
+        collector.on('collect', async (msg) => {
+            const answer = msg.content.trim();
+
+            // فحص أولي: إذا كانت الكلمة مستخدمة سابقاً => مرفوضة فوراً
+            if (usedWords.includes(answer)) {
+                await msg.reply(`${EMOJI.ERROR} الكلمة "${answer}" سبق استخدامها! تم طردك.`);
+                resolve(false);
+                return;
+            }
+
+            let isValid = false;
+            const firstLetter = answer.charAt(0);
+            let startsWithCorrectLetter = false;
+
+            if (letter === 'أ') {
+                startsWithCorrectLetter = (firstLetter === 'أ' || firstLetter === 'إ' || firstLetter === 'آ' || firstLetter === 'ا');
+            } else {
+                startsWithCorrectLetter = (firstLetter === letter);
+            }
+
+            if (startsWithCorrectLetter) {
+                isValid = await validateAnswer(letter, category, answer);
+            }
+
+            if (isValid) {
+                usedWords.push(answer); // تسجيل الكلمة الصحيحة
+                await msg.reply(`${EMOJI.OK} إجابة <@${player.id}> صحيحة!`);
+                resolve(true);
+            } else {
+                await msg.reply(`${EMOJI.LOSE} | إجابة <@${player.id}> خاطئة! تم طردك من اللعبة.`);
+                resolve(false);
+            }
         });
-        const answerMessage = collected.first();
-        const answerWord = answerMessage.content.trim();
 
-        // التحقق من أن الكلمة تبدأ بالحرف الصحيح وتنتمي للفئة (AI)
-        valid = await isValidWord(answerWord, currentLetter, category);
+        collector.on('end', async (collected) => {
+            if (collected.size === 0) {
+                await questionMsg.reply(`${EMOJI.KICK} | تم طرد <@${player.id}> لعدم تفاعله في اللعبة.`);
+                resolve(false);
+            }
+        });
+    });
+}
 
-        // التأكد من عدم تكرار الكلمة
-        if (valid && usedWords.includes(answerWord)) {
-          valid = false;
-          await context.channel.send(`${EMOJI.ERROR} الكلمة "${answerWord}" سبق استخدامها!`);
+// ======================== التحقق بالذكاء الاصطناعي (بدون تغيير) ========================
+async function validateAnswer(letter, category, answer) {
+    const prompt = `
+نحن نلعب لعبة "نبات جماد حيوان".
+الحرف المطلوب: "${letter}".
+التصنيف: "${category}".
+الإجابة التي قالها اللاعب: "${answer}".
+
+تحقق إذا كانت الإجابة صحيحة بناءً على الحرف والتصنيف، مع مراعاة ما يلي:
+
+- إذا كان الحرف "${letter}" هو "أ" أو "ا" أو "إ" أو "آ"، فكل هذه تُعتبر صحيحة بنفس المعنى (أي أن الكلمة التي تبدأ بأي منها تعتبر مقبولة).
+- تجاهل التشكيل (الحركات).
+- لا تكن صارمًا في التطابق الحرفي إن كانت الكلمة صحيحة لغويًا وتبدأ بنفس الصوت.
+- يجب أن تكون الكلمة من التصنيف المطلوب (إنسان، حيوان، نبات، جماد، دولة).
+- أجب بـ "نعم" فقط إذا كانت الإجابة صحيحة تمامًا ضمن هذه القواعد، أو "لا" إذا كانت خاطئة.
+`;
+
+    try {
+        const response = await fetch('https://yaniis.alwaysdata.net/api/api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: "gemini3.1pro",
+                question: prompt
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        if (valid) {
-          usedWords.push(answerWord);
-          await answerMessage.react('✅');
-          answered = true;
-        } else {
-          await answerMessage.react('❌');
-        }
-      } catch (e) {
-        // انتهى الوقت أو لم يرسل شيئاً
-        await context.channel.send(`${EMOJI.TIMER} انتهى الوقت!`);
-      }
+        const rawText = await response.text();
+        let resultText = rawText;
 
-      if (!answered || !valid) {
-        // اللاعب يخرج
-        await context.channel.send(`${EMOJI.KICK} <@${player.id}> خرج من اللعبة!`);
-        alivePlayers = alivePlayers.filter(p => p.id !== player.id);
-        if (alivePlayers.length <= 1) break; // فوز مبكر
-      }
+        try {
+            const json = JSON.parse(rawText);
+            if (json.response) resultText = json.response;
+            else if (json.answer) resultText = json.answer;
+            else if (json.text) resultText = json.text;
+            else if (json.result) resultText = json.result;
+        } catch (_) { }
 
-      await sleep(1000); // وقفة بين اللاعبين
+        console.log("\n==============================");
+        console.log("🧠 [AI Prompt]:", prompt);
+        console.log("💬 [AI Response]:", resultText);
+        console.log("==============================\n");
+
+        return resultText.includes("نعم");
+    } catch (error) {
+        console.error("❌ Error validating with AI:", error);
+        return false;
+    }
+}
+
+async function checkWin(context, callback) {
+    if (players.length === 1) {
+        const winner = players[0];
+        await context.channel.send(`${EMOJI.WIN} - <@${winner.id}> فاز باللعبة!`);
+        await win(winner.id, context);
+        resetGameData();
+        callback();
+        return true;
     }
 
-    letterIndex++; // الحرف التالي بعد انتهاء الجولة
-  }
+    if (players.length === 0) {
+        await context.channel.send(`${EMOJI.LOSE} تم طرد جميع اللاعبين ، لم يفز أحد.`);
+        resetGameData();
+        callback();
+        return true;
+    }
 
-  // ==== الإعلان عن الفائز ====
-  if (alivePlayers.length === 1) {
-    const winner = alivePlayers[0];
-    await win(winner.id, context);
-    await context.channel.send(`${EMOJI.WIN} | **<@${winner.id}> هو الفائز الأخير! مبروك!**`);
-    // إرسال ملخص اللاعبين
-    const allPlayers = currentPlayers;
-    const msg = `# ${EMOJI.WIN} نهاية اللعبة\n${allPlayers.map(p => `- <@${p.id}>`).join('\n')}\n\n${EMOJI.WIN} الفائز: <@${winner.id}>`;
-    await context.channel.send(msg);
-  } else {
-    await context.channel.send(`${EMOJI.SKIP} انتهت جميع الحروف دون فائز وحيد.`);
-  }
-
-  resetGameData();
-  callback(null, false, 0, "Game finished");
+    return false;
 }
