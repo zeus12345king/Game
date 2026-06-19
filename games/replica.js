@@ -1,4 +1,4 @@
-﻿const {
+const {
   ContainerBuilder,
   TextDisplayBuilder,
   MessageFlags,
@@ -8,21 +8,11 @@
 } = require("discord.js");
 const db = require('../database.js');
 const config = require('../config.js');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 15;
 const TIME_TO_START = config.lobbyTime.replica;
 const TIME_TO_ANSWER = 15000;
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-let genAI;
-let geminiModel;
-
-if (GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-}
 
 let GAME_ACTIVE = false;
 let players = [];
@@ -37,11 +27,6 @@ module.exports = {
   name: 'replica',
   aliases: ["ريبلكا"],
   async execute(message, args, callback) {
-    if (!GEMINI_API_KEY) {
-        message.reply("⚠️ | عذراً، لم يتم إعداد مفتاح Gemini API لهذه اللعبة. يرجى إضافته إلى ملف `.env`.");
-        callback();
-        return;
-    }
     if (GAME_ACTIVE) {
       message.reply(`> **❌ | لقد بدأت لعبة أخرى بالفعل. الرجاء الانتظار حتى انتهاء اللعبة الحالية.**`);
       callback();
@@ -258,29 +243,42 @@ async function validateAnswer(letter, category, answer) {
 `;
 
     try {
-        const result = await geminiModel.generateContent(prompt);
+        const response = await fetch('https://yaniis.alwaysdata.net/api/api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: "gemini3.1pro",
+                question: prompt
+            })
+        });
 
-        let text;
-        if (result.response?.text) {
-            text = result.response.text();
-        } else if (result.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
-            text = result.response.candidates[0].content.parts[0].text;
-        } else if (result?.candidates?.[0]?.content?.parts?.[0]?.text) {
-            text = result.candidates[0].content.parts[0].text;
-        } else {
-            text = "[No text output found]";
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        text = (text || "").trim();
+        const rawText = await response.text();
+        let resultText = rawText;
+
+        // محاولة تحليل JSON إذا كان الرد بصيغة JSON
+        try {
+            const json = JSON.parse(rawText);
+            if (json.response) resultText = json.response;
+            else if (json.answer) resultText = json.answer;
+            else if (json.text) resultText = json.text;
+            else if (json.result) resultText = json.result;
+            // إذا كان هناك حقل آخر يمكن إضافته حسب الحاجة
+        } catch (_) {
+            // ليس JSON، نستخدم النص الخام
+        }
 
         console.log("\n==============================");
-        console.log("🧠 [Gemini Prompt]:", prompt);
-        console.log("💬 [Gemini Response]:", text);
+        console.log("🧠 [AI Prompt]:", prompt);
+        console.log("💬 [AI Response]:", resultText);
         console.log("==============================\n");
 
-        return text.includes("نعم");
+        return resultText.includes("نعم");
     } catch (error) {
-        console.error("❌ Error validating with Gemini:", error);
+        console.error("❌ Error validating with AI:", error);
         return false;
     }
 }
