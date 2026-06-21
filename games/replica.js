@@ -377,14 +377,8 @@ async function validateAnswer(letter, category, answer) {
 `;
 
     try {
-        const response = await fetch('https://kakarot.cc.cd/api/api.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: "gemini3.1pro",
-                question: prompt
-            })
-        });
+        const url = `https://kakarot.cc.cd/api/api.php?${new URLSearchParams({ model: "gemini3.1pro", question: prompt })}`;
+        const response = await fetch(url);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -422,14 +416,8 @@ async function checkCountryExists(letter) {
     const prompt = `هل توجد دولة تبدأ بحرف "${letter}"؟ أجب بـ "نعم" أو "لا" فقط.`;
 
     try {
-        const response = await fetch('https://kakarot.cc.cd/api/api.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: "gemini3.1pro",
-                question: prompt
-            })
-        });
+        const url = `https://kakarot.cc.cd/api/api.php?${new URLSearchParams({ model: "gemini3.1pro", question: prompt })}`;
+        const response = await fetch(url);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
