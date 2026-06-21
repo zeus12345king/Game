@@ -377,7 +377,7 @@ async function validateAnswer(letter, category, answer) {
 `;
 
     try {
-        const response = await fetch('https://yaniis.alwaysdata.net/api/api.php', {
+        const response = await fetch('https://kakarot.cc.cd/api/api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -422,7 +422,7 @@ async function checkCountryExists(letter) {
     const prompt = `هل توجد دولة تبدأ بحرف "${letter}"؟ أجب بـ "نعم" أو "لا" فقط.`;
 
     try {
-        const response = await fetch('https://yaniis.alwaysdata.net/api/api.php', {
+        const response = await fetch('https://kakarot.cc.cd/api/api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
