@@ -360,25 +360,24 @@ async function askQuestion(context, player, letter, category) {
 }
 
 // ======================== التحقق بالذكاء الاصطناعي ========================
-async function validateAnswer(letter, category, answer) {
-    const prompt = `
-نحن نلعب لعبة "نبات جماد حيوان".
-الحرف المطلوب: "${letter}".
-التصنيف: "${category}".
-الإجابة التي قالها اللاعب: "${answer}".
+const AI_API_URL = "https://api.kakarot.cc.cd/api.php";
+const AI_MODEL = "gemini3.1pro";
 
-تحقق إذا كانت الإجابة صحيحة بناءً على الحرف والتصنيف، مع مراعاة ما يلي:
+async function askAI(prompt) {
+    const url = `${AI_API_URL}?${new URLSearchParams({ model: AI_MODEL, question: prompt })}`;
 
-- إذا كان الحرف "${letter}" هو "أ" أو "ا" أو "إ" أو "آ"، فكل هذه تُعتبر صحيحة بنفس المعنى (أي أن الكلمة التي تبدأ بأي منها تعتبر مقبولة).
-- تجاهل التشكيل (الحركات).
-- لا تكن صارمًا في التطابق الحرفي إن كانت الكلمة صحيحة لغويًا وتبدأ بنفس الصوت.
-- يجب أن تكون الكلمة من التصنيف المطلوب (إنسان، حيوان، نبات، جماد، دولة).
-- أجب بـ "نعم" فقط إذا كانت الإجابة صحيحة تمامًا ضمن هذه القواعد، أو "لا" إذا كانت خاطئة.
-`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
 
     try {
-        const url = `https://kakarot.cc.cd/api/api.php?${new URLSearchParams({ model: "gemini3.1pro", question: prompt })}`;
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            method: "GET",
+            headers: {
+                "User-Agent": "Mozilla/5.0 discord-bot-replica/1.0",
+                "Accept": "application/json,text/plain,*/*",
+            },
+            signal: controller.signal,
+        });
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -389,18 +388,45 @@ async function validateAnswer(letter, category, answer) {
 
         try {
             const json = JSON.parse(rawText);
-            if (json.response) resultText = json.response;
-            else if (json.answer) resultText = json.answer;
-            else if (json.text) resultText = json.text;
-            else if (json.result) resultText = json.result;
+            resultText = json.answer || json.response || json.text || json.result || rawText;
         } catch (_) { }
+
+        return String(resultText).trim();
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+function isYes(text) {
+    const clean = String(text || "").trim().toLowerCase();
+    return /(^|\s)(نعم|اي|إي|yes|true|صحيح|صح)(\s|$|[.!،,])/.test(clean);
+}
+
+async function validateAnswer(letter, category, answer) {
+    const prompt = `
+نحن نلعب لعبة "نبات جماد حيوان".
+الحرف المطلوب: "${letter}".
+التصنيف: "${category}".
+الإجابة التي قالها اللاعب: "${answer}".
+
+تحقق إذا كانت الإجابة صحيحة بناءً على الحرف والتصنيف، مع مراعاة ما يلي:
+
+- إذا كان الحرف "${letter}" هو "أ" أو "ا" أو "إ" أو "آ"، فكل هذه تُعتبر صحيحة بنفس المعنى.
+- تجاهل التشكيل (الحركات).
+- لا تكن صارمًا في التطابق الحرفي إن كانت الكلمة صحيحة لغويًا وتبدأ بنفس الصوت.
+- يجب أن تكون الكلمة من التصنيف المطلوب (إنسان، حيوان، نبات، جماد، دولة).
+- أجب بكلمة واحدة فقط: نعم أو لا.
+`;
+
+    try {
+        const resultText = await askAI(prompt);
 
         console.log("\n==============================");
         console.log("🧠 [AI Prompt]:", prompt);
         console.log("💬 [AI Response]:", resultText);
         console.log("==============================\n");
 
-        return resultText.includes("نعم");
+        return isYes(resultText);
     } catch (error) {
         console.error("❌ Error validating with AI:", error);
         return false;
@@ -413,29 +439,14 @@ async function checkCountryExists(letter) {
         return countryCache[letter];
     }
 
-    const prompt = `هل توجد دولة تبدأ بحرف "${letter}"؟ أجب بـ "نعم" أو "لا" فقط.`;
+    const prompt = `هل توجد دولة تبدأ بحرف "${letter}"؟ أجب بكلمة واحدة فقط: نعم أو لا.`;
 
     try {
-        const url = `https://kakarot.cc.cd/api/api.php?${new URLSearchParams({ model: "gemini3.1pro", question: prompt })}`;
-        const response = await fetch(url);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const rawText = await response.text();
-        let resultText = rawText;
-
-        try {
-            const json = JSON.parse(rawText);
-            if (json.response) resultText = json.response;
-            else if (json.answer) resultText = json.answer;
-            else if (json.text) resultText = json.text;
-            else if (json.result) resultText = json.result;
-        } catch (_) { }
-
-        const exists = resultText.includes("نعم");
+        const resultText = await askAI(prompt);
+        const exists = isYes(resultText);
         countryCache[letter] = exists;
+
+        console.log(`[Replica] Country exists for ${letter}:`, resultText, "=>", exists);
         return exists;
     } catch (error) {
         console.error("❌ Error checking country existence:", error);
